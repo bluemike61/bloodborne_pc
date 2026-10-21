@@ -278,12 +278,18 @@ int32_t Evaluate(VkCommandBuffer command, const BbDlssEvaluate* evaluate) {
     auto depth = Wrap(evaluate->depth, false);
     auto motion = Wrap(evaluate->motion, false);
     auto output = Wrap(evaluate->output, true);
+    // Optional NGX current-color bias mask for moving-object silhouettes.
+    NVSDK_NGX_Resource_VK bias{};
+    if (evaluate->bias.image != VK_NULL_HANDLE)
+        bias = Wrap(evaluate->bias, false);
     NVSDK_NGX_VK_DLSS_Eval_Params parameters{};
     parameters.Feature.pInColor = &color;
     parameters.Feature.pInOutput = &output;
     parameters.Feature.InSharpness = evaluate->sharpness;
     parameters.pInDepth = &depth;
     parameters.pInMotionVectors = &motion;
+    if (evaluate->bias.image != VK_NULL_HANDLE)
+        parameters.pInBiasCurrentColorMask = &bias;
     parameters.InRenderSubrectDimensions = {state.feature_desc.input_width,
                                             state.feature_desc.input_height};
     parameters.InJitterOffsetX = evaluate->jitter_x;
