@@ -267,7 +267,11 @@ def main():
         print("Hunter's Atlas: on in the settings, but its maps are not prepared (launcher: Prepare maps)")
     # Rebirth's runtime half acts only with the altar's rewritten script in place.
     env['BB_PC_REBIRTH_ACTIVE'] = '1' if any(Path(f).name == 'rebirth' for f in generated) else '0'
-    env['BB_PC_MENU_QUIT'] = '1' if menu and all(
+    # Keep an explicit opt-out: it allows testing the native System PC sections
+    # without installing the separate title-screen Quit hook. Never install the
+    # hook unless both generated title movies actually exist.
+    quit_disabled = env.get('BB_PC_MENU_QUIT') == '0'
+    env['BB_PC_MENU_QUIT'] = '1' if not quit_disabled and menu and all(
         (menu / 'dvdroot_ps4/menu' / name).is_file() for name in ('title.gfx', 'title_dlc.gfx')) else '0'
     # Ultrawide outputs (wider than 16:9): the menu movies with full-screen backdrops widened and
     # the HUD's corner groups toward the screen edges (bbport.ini hud_position, 0 centred .. 100
