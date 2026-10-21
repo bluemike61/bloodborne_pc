@@ -34,7 +34,7 @@ The mask is omitted when object vectors are unavailable. FSR and TAA do not use 
   The accepted range is `0.0`–`2.0`; invalid values fall back to `1.0`.
   Increase it if trails remain, or reduce it if textures flicker or soften.
   The shader clamps the final mask to `[0,1]`. `0.0` skips the bias dispatch
-  entirely to save GPU work.
+  and avoids allocating its render-size texture, saving GPU work and memory.
 - `BB_OBJECT_MOTION=1` and `BB_JITTER=1`: retain geometry motion and
   camera jitter; these are important inputs rather than fixes to disable.
 
@@ -78,6 +78,9 @@ K with bias disabled, J with bias enabled, and J with bias disabled. Use
 identical resolutions, jitter, object motion and graphics settings, and compare
 both ghosting and texture flicker. Test the driver default separately if helpful.
 Because the settings are read at startup, restart between runs.
+
+Switching between FSR 4 and DLAA in the game menu also rebuilds the
+DLAA-specific bias image if needed; it is not limited to the first startup mode.
 
 ## Limitations
 
