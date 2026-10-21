@@ -221,10 +221,27 @@ bool Dlss::CreateFeature(vk::CommandBuffer command, const FeatureDesc& desc) {
         return false;
     }
     impl->feature.reset();
-    // NVIDIA NGX preset K (11): explicitly request the transformer model for
-    // native-resolution DLAA. Leave the other DLSS quality modes on driver default.
-    constexpr u32 PresetK = 11;
-    const u32 preset = desc.quality == 0 ? PresetK : 0u;
+    // DLAA defaults to NVIDIA's transformer preset K (11). Permit a startup-only
+    // A/B comparison with preset J (10, potentially less trailing/more flicker)
+    // or the driver default (0), without editing/rebuilding the bridge.
+    // Non-DLAA upscaling modes continue using their driver-selected defaults.
+    u32 preset = 0;
+    if (desc.quality == 0) {
+        constexpr u32 PresetJ = 10, PresetK = 11;
+        preset = PresetK;
+        if (const char* choice = std::getenv("BB_DLAA_PRESET")) {
+            const std::string_view name{choice};
+            if (name == "J" || name == "j" || name == "10") {
+                preset = PresetJ;
+            } else if (name == "default" || name == "DEFAULT" || name == "0") {
+                preset = 0;
+            } else if (name != "K" && name != "k" && name != "11") {
+                std::printf("DLAA: unrecognized BB_DLAA_PRESET='%s'; using K\\n", choice);
+            }
+        }
+        std::printf("DLAA: requesting NVIDIA preset %s (BB_DLAA_PRESET=K/J/default)\\n",
+                    preset == PresetK ? "K" : preset == PresetJ ? "J" : "driver default");
+    }
     const BbDlssFeature feature{desc.input_width,  desc.input_height, desc.output_width,
                                 desc.output_height, desc.quality,      0,
                                 preset,             desc.hdr ? 1 : 0};
