@@ -12,6 +12,13 @@ layout(binding = 0) uniform texture2D objects;
 layout(binding = 1) uniform texture2D scene_depth;
 layout(binding = 2, r8) uniform writeonly image2D bias;
 
+// Match camera_motion.comp's perspective depth tolerance; allow bias tuning
+// without requiring a different shader or DLSS bridge DLL.
+layout(push_constant) uniform Params {
+    float projection_depth_scale;
+    float strength;
+} params;
+
 void main() {
     const ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
     const ivec2 size = imageSize(bias);
@@ -29,9 +36,10 @@ void main() {
             // Reject motion from a pixel later covered by another (untracked)
             // draw, using the same depth test as camera_motion.comp.
             const float depth = texelFetch(scene_depth, neighbour, 0).r;
-            const float depth_threshold = max(2e-7, (1.00002 - depth) * 0.01);
+            const float depth_threshold =
+                max(2e-7, (params.projection_depth_scale - depth) * 0.01);
             if (object.b < 0.99 || abs(object.a - depth) >= depth_threshold ||
-                any(isnan(object.rg)) || any(isinf(object.rg))) {
+                any(isnan(object)) || any(isinf(object))) {
                 continue;
             }
             const float speed = length(object.rg);
@@ -41,5 +49,5 @@ void main() {
             value = max(value, strength * proximity);
         }
     }
-    imageStore(bias, pixel, vec4(value, 0.0, 0.0, 0.0));
+    imageStore(bias, pixel, vec4(clamp(value * params.strength, 0.0, 1.0), 0.0, 0.0, 0.0));
 }
