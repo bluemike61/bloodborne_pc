@@ -1,0 +1,39 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// DLAA: discourage temporal history on animated object pixels and their immediate
+// silhouettes. Intel/AMD temporal paths do not consume this NVIDIA-specific mask.
+#version 450
+#extension GL_EXT_samplerless_texture_functions : require
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+// Object-motion attachment: RG = current-to-previous motion in render pixels;
+// B = object-vector validity; A = depth recorded when the object was drawn.
+layout(binding = 0) uniform texture2D objects;
+layout(binding = 1, r8) uniform writeonly image2D bias;
+
+void main() {
+    const ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    const ivec2 size = imageSize(bias);
+    if (any(greaterThanEqual(pixel, size))) {
+        return;
+    }
+
+    // Bias a one-pixel ring outside animated shapes, where disoccluded pixels
+    // frequently have only a camera vector. Leave the rest of the picture alone.
+    float value = 0.0;
+    for (int y = -1; y <= 1; ++y) {
+        for (int x = -1; x <= 1; ++x) {
+            const ivec2 neighbour = clamp(pixel + ivec2(x, y), ivec2(0), size - 1);
+            const vec4 object = texelFetch(objects, neighbour, 0);
+            if (object.b < 0.99 || any(isnan(object.rg)) || any(isinf(object.rg))) {
+                continue;
+            }
+            const float speed = length(object.rg);
+            // Preserve subpixel temporal detail. Stronger bias for actual movement.
+            const float strength = clamp((speed - 0.75) / 18.0, 0.0, 0.75);
+            const float proximity = (x == 0 && y == 0) ? 1.0 : 0.7;
+            value = max(value, strength * proximity);
+        }
+    }
+    imageStore(bias, pixel, vec4(value, 0.0, 0.0, 0.0));
+}
