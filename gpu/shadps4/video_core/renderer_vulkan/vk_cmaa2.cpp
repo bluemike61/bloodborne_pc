@@ -287,6 +287,8 @@ bool Cmaa2Pass::Record(vk::CommandBuffer cmd, vk::Image input, vk::ImageView inp
     sync();
     bind(1); cmd.dispatch(2, 1, 1);
     sync();
+    bind(2); cmd.dispatchIndirect(buffers[4].buffer, 0);
+    sync();
     if (inspect) {
         const vk::MemoryBarrier2 to_transfer{
             .srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
@@ -306,8 +308,6 @@ bool Cmaa2Pass::Record(vk::CommandBuffer cmd, vk::Image input, vk::ImageView inp
         };
         cmd.pipelineBarrier2({.memoryBarrierCount = 1, .pMemoryBarriers = &resume});
     }
-    bind(2); cmd.dispatchIndirect(buffers[4].buffer, 0);
-    sync();
     bind(1); cmd.dispatch(1, 2, 1);
     sync();
     bind(3); cmd.dispatchIndirect(buffers[4].buffer, 0);
