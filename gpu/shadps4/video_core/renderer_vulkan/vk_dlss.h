@@ -37,6 +37,8 @@ public:
     void Shutdown();
 
     [[nodiscard]] bool Available() const;
+    /// True when the rebuilt bridge supports the optional DLAA bias mask (ABI 3).
+    [[nodiscard]] bool SupportsBias() const;
     /// Why DLSS cannot run on this system (empty when it can, or before device creation).
     [[nodiscard]] std::string Problem() const;
 
