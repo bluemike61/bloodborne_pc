@@ -2308,8 +2308,9 @@ bool TemporalUpscaler::RecordDlss(vk::CommandBuffer cmdbuf, const Dlss::Resource
                     vk::ImageAspectFlagBits::eColor, w, h};
             static bool reported = false;
             if (!reported) {
-                std::printf("DLAA: animated-object history bias enabled (strength %.2f, "
-                            "BB_DLAA_BIAS=0 disables)\n", DlssBiasStrength());
+                std::printf("DLAA: animated-object history bias enabled (mask submitted; "
+                            "model may ignore it; strength %.2f; BB_DLAA_BIAS=0 disables)\n",
+                            DlssBiasStrength());
                 reported = true;
             }
         }
