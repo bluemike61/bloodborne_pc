@@ -4,7 +4,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdio>
 #include <stdexcept>
+#include <utility>
 
 #include "video_core/host_shaders/cmaa2_spirv.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -31,13 +33,15 @@ Cmaa2Pass::Cmaa2Pass(const Instance& instance_, Scheduler& scheduler_)
                        .descriptorCount = 1,
                        .stageFlags = vk::ShaderStageFlagBits::eCompute};
     }
-    descriptor_layout = Check(device.createDescriptorSetLayoutUnique({
-        .flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptor,
-        .bindingCount = u32(bindings.size()), .pBindings = bindings.data(),
-    }));
-    pipeline_layout = Check(device.createPipelineLayoutUnique({
-        .setLayoutCount = 1, .pSetLayouts = &*descriptor_layout,
-    }));
+    descriptor_layout = Check<"create CMAA2 push descriptor layout">(
+        device.createDescriptorSetLayoutUnique({
+            .flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptor,
+            .bindingCount = u32(bindings.size()), .pBindings = bindings.data(),
+        }));
+    pipeline_layout = Check<"create CMAA2 pipeline layout">(
+        device.createPipelineLayoutUnique({
+            .setLayoutCount = 1, .pSetLayouts = &*descriptor_layout,
+        }));
     CreatePipelines();
 }
 
@@ -49,6 +53,12 @@ Cmaa2Pass::~Cmaa2Pass() {
 }
 
 void Cmaa2Pass::CreatePipelines() {
+    // DXC's default SPIR-V entry point name is the HLSL function passed to -E.
+    // The generated modules do not export a generic "main" entry point.
+    constexpr std::array<const char*, 4> entry_names{{
+        "EdgesColor2x2CS", "ComputeDispatchArgsCS",
+        "ProcessCandidatesCS", "DeferredColorApply2x2CS",
+    }};
     const std::array<std::array<std::span<const u32>, 4>, 2> spirv{{
         {{CMAA2_HDR_EDGES, CMAA2_HDR_ARGS, CMAA2_HDR_CANDIDATES, CMAA2_HDR_APPLY}},
         {{CMAA2_LDR_EDGES, CMAA2_LDR_ARGS, CMAA2_LDR_CANDIDATES, CMAA2_LDR_APPLY}},
@@ -58,10 +68,16 @@ void Cmaa2Pass::CreatePipelines() {
             const auto module = CompileSPV(spirv[fmt][i], device);
             const vk::ComputePipelineCreateInfo ci{
                 .stage = {.stage = vk::ShaderStageFlagBits::eCompute,
-                          .module = module, .pName = "main"},
+                          .module = module, .pName = entry_names[i]},
                 .layout = *pipeline_layout,
             };
-            pipelines[fmt][i] = Check(device.createComputePipelineUnique({}, ci));
+            auto result = device.createComputePipelineUnique({}, ci);
+            if (result.result != vk::Result::eSuccess) {
+                std::fprintf(stderr, "CMAA2: Vulkan compute pipeline %s/%s failed: %s\n",
+                             fmt == 0 ? "HDR" : "LDR", entry_names[i],
+                             vk::to_string(result.result).c_str());
+            }
+            pipelines[fmt][i] = Check<"create CMAA2 compute pipeline">(std::move(result));
             device.destroyShaderModule(module);
         }
     }
@@ -95,7 +111,7 @@ void Cmaa2Pass::Resize(u32 width, u32 height) {
             .usage = vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst,
             .initialLayout = vk::ImageLayout::eUndefined,
         });
-        views[i] = Check(device.createImageViewUnique({
+        views[i] = Check<"create CMAA2 scratch image view">(device.createImageViewUnique({
             .image = vk::Image(images[i]), .viewType = vk::ImageViewType::e2D,
             .format = formats[i], .subresourceRange = ColorRange,
         }));
