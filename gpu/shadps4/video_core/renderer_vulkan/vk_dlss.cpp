@@ -221,9 +221,13 @@ bool Dlss::CreateFeature(vk::CommandBuffer command, const FeatureDesc& desc) {
         return false;
     }
     impl->feature.reset();
+    // NVIDIA NGX preset K (11): explicitly request the transformer model for
+    // native-resolution DLAA. Leave the other DLSS quality modes on driver default.
+    constexpr u32 PresetK = 11;
+    const u32 preset = desc.quality == 0 ? PresetK : 0u;
     const BbDlssFeature feature{desc.input_width,  desc.input_height, desc.output_width,
                                 desc.output_height, desc.quality,      0,
-                                0,                  desc.hdr ? 1 : 0};
+                                preset,             desc.hdr ? 1 : 0};
     if (!impl->api->CreateFeature(command, &feature)) {
         return false;
     }
