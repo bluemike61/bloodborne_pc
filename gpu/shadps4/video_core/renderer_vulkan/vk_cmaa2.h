@@ -46,6 +46,7 @@ private:
     vk::UniqueDescriptorSetLayout descriptor_layout;
     vk::UniquePipelineLayout pipeline_layout;
     std::array<std::array<vk::UniquePipeline, 4>, 2> pipelines;
+    vk::UniquePipeline debug_ldr_apply_pipeline;
     // Edges R8_UINT, linked-list heads R32_UINT.
     std::array<VideoCore::UniqueImage, 2> images;
     std::array<vk::UniqueImageView, 2> views;
