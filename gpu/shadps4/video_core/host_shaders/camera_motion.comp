@@ -52,7 +52,16 @@ void main() {
     const vec2 prev_ndc =
         vec2(prev_view.x * prev_proj.x, prev_view.y * prev_proj.y) / max(prev_view.z, 1e-4);
     const vec2 prev_uv = vec2(prev_ndc.x * 0.5 + 0.5, 0.5 - prev_ndc.y * 0.5);
-    const vec2 motion = (prev_uv - scene_uv) * size;
+    const vec2 reprojected_motion = (prev_uv - scene_uv) * size;
+    // When the current pixel was behind the previous camera, no valid history
+    // location exists. The denominator clamp alone can produce velocities that
+    // overflow our RG16F motion texture near the old camera plane. Use a finite
+    // off-screen motion instead, asking the temporal upscaler to reject history.
+    // Also reject NaNs/infinities and magnitudes that cannot be represented
+    // robustly in a signed 16-bit floating-point motion channel.
+    const bool valid_reprojection = prev_view.z > 1e-4 &&
+        all(lessThan(abs(reprojected_motion), vec2(32768.0)));
+    const vec2 motion = valid_reprojection ? reprojected_motion : -2.0 * size;
 
 #ifdef DEBUG_OVERLAY
     const vec4 current = imageLoad(color_img, pixel);
