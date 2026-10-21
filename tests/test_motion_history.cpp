@@ -104,6 +104,23 @@ int main() {
     ranges.Trim(IndexRangeCache::Revalidate + IndexRangeCache::Unused + 1);
     assert(ranges.Size() == 0);
 
+    // With strict checks, reusing the same address/count for different indices
+    // must not carry history through 32 frames of stale topology.
+    IndexRangeCache dynamic_ranges;
+    uint64_t topology = 1;
+    uint32_t dynamic_scans = 0;
+    const auto scan_dynamic = [&] {
+        ++dynamic_scans;
+        return IndexRangeCache::Result{{4, 3}, topology};
+    };
+    assert(dynamic_ranges.Get(mesh, 0, scan_dynamic, 1).topology == 1);
+    topology = 2;
+    assert(dynamic_ranges.Get(mesh, 1, scan_dynamic, 1).topology == 2);
+    assert(dynamic_ranges.stats.stale == 1 && dynamic_scans == 2);
+    // Multiple identical draws in the same frame still reuse the checked result.
+    assert(dynamic_ranges.Get(mesh, 1, scan_dynamic, 1).topology == 2);
+    assert(dynamic_scans == 2);
+
     assert(JitterPhases(1920, 1920) == 8);
     assert(JitterPhases(1280, 1920) == 18);
     assert(JitterPhases(960, 1920) == 32);
