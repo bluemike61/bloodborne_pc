@@ -533,10 +533,13 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
                    vk::ImageUsageFlagBits::eTransferSrc);
     make_image(reactive_image, reactive_view, vk::Format::eR8Unorm,
                vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled);
-    if (UseDlss()) {
+    const char* bias_setting = std::getenv("BB_DLAA_BIAS");
+    if (UseDlss() && Dlss::Get()->SupportsBias() &&
+        !(bias_setting && bias_setting[0] == '0') && DlssBiasStrength() > 0.0f) {
         make_image(dlss_bias_image, dlss_bias_view, vk::Format::eR8Unorm,
                    vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled);
     } else {
+        // An A/B test with the mask disabled should not reserve a render-size R8 image.
         dlss_bias_view.reset();
         dlss_bias_image = VideoCore::UniqueImage{};
     }
