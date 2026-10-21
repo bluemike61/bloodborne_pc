@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <vk_mem_alloc.h>
 #include "video_core/renderer_vulkan/vk_common.h"
-#include "video_core/texture_cache/texture_cache.h"
+#include "video_core/texture_cache/image.h"
 
 namespace Vulkan {
 class Instance;
