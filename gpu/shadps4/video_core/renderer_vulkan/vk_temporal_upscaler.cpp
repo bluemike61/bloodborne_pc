@@ -403,14 +403,16 @@ void TemporalUpscaler::OnDispatch(u64 cs_hash) {
 
 bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
     // DLSS, like FSR 4, has its own context: no portable FSR 3 context is made.
-    const bool use_fsr4 = UseFsr4() || UseDlss();
+    const bool use_dlss = UseDlss();
+    const bool use_fsr4 = UseFsr4() || use_dlss;
     const bool use_taa = BbSettings::Get().upscaler == BbSettings::UpscalerTaa;
     if (use_taa && (w != ow || h != oh)) {
         std::printf("TAA: remove BB_RENDER_RES to use native-resolution TAA\n");
         return false;
     }
     if (resources_ready && w == width && h == height && ow == out_width && oh == out_height &&
-        hdr == context_hdr && use_fsr4 == resources_fsr4 && use_taa == resources_taa) {
+        hdr == context_hdr && use_fsr4 == resources_fsr4 &&
+        use_dlss == resources_dlss && use_taa == resources_taa) {
         return true;
     }
     const auto device = instance.GetDevice();
@@ -534,7 +536,7 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
     make_image(reactive_image, reactive_view, vk::Format::eR8Unorm,
                vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled);
     const char* bias_setting = std::getenv("BB_DLAA_BIAS");
-    if (UseDlss() && Dlss::Get()->SupportsBias() &&
+    if (use_dlss && Dlss::Get()->SupportsBias() &&
         !(bias_setting && bias_setting[0] == '0') && DlssBiasStrength() > 0.0f) {
         make_image(dlss_bias_image, dlss_bias_view, vk::Format::eR8Unorm,
                    vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled);
@@ -559,6 +561,7 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
     reset = true;
     resources_ready = true;
     resources_fsr4 = use_fsr4;
+    resources_dlss = use_dlss;
     resources_taa = use_taa;
     if (use_taa) {
         std::printf("TAA: context %ux%u -> %ux%u (%s), no FSR model\n", w, h, ow, oh,
