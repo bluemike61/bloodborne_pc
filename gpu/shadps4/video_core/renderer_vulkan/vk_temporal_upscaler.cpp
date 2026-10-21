@@ -1813,10 +1813,19 @@ void TemporalUpscaler::RunScaled() {
         if (w == ow && h == oh &&
             color.info.pixel_format == vk::Format::eR8G8B8A8Unorm &&
             (color.usage_flags & vk::ImageUsageFlagBits::eTransferSrc)) {
-            const auto target_view = Mirror(vk::Image(ui_image), ui_views,
-                                            color.info.pixel_format, {});
+            // Mirror() deliberately restricts its image views to SAMPLED |
+            // COLOR_ATTACHMENT. CMAA2 writes via a storage-image descriptor,
+            // so it needs an unrestricted storage-capable view instead.
+            if (!ui_storage_view) {
+                ui_storage_view = Check<"create CMAA2 LDR storage image view">(
+                    instance.GetDevice().createImageViewUnique({
+                        .image = vk::Image(ui_image), .viewType = vk::ImageViewType::e2D,
+                        .format = vk::Format::eR8G8B8A8Unorm,
+                        .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
+                    }));
+            }
             ok = cmaa2->Record(cmdbuf, color_image, color_view, vk::Image(ui_image),
-                               target_view, w, h, color.info.pixel_format);
+                               *ui_storage_view, w, h, color.info.pixel_format);
         }
 #endif
         barrier(vk::Image(ui_image), vk::ImageAspectFlagBits::eColor,
