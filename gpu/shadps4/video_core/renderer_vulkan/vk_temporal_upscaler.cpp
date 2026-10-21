@@ -19,6 +19,7 @@
 #include "ffx_vk_portable.h"
 #include "video_core/host_shaders/upscale_merge_comp.h"
 #include "video_core/host_shaders/upscale_reactive_comp.h"
+#include "video_core/host_shaders/dlss_bias_comp.h"
 #include "video_core/host_shaders/taa_comp.h"
 #include "video_core/host_shaders/taa_sharpen_comp.h"
 #include "video_core/host_shaders/taa_sharpen_ldr_comp.h"
@@ -513,6 +514,13 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
                    vk::ImageUsageFlagBits::eTransferSrc);
     make_image(reactive_image, reactive_view, vk::Format::eR8Unorm,
                vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled);
+    if (UseDlss()) {
+        make_image(dlss_bias_image, dlss_bias_view, vk::Format::eR8Unorm,
+                   vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled);
+    } else {
+        dlss_bias_view.reset();
+        dlss_bias_image = VideoCore::UniqueImage{};
+    }
     for (u32 i = 0; i < taa_history.size(); ++i) {
         taa_history_views[i].reset();
         taa_history[i] = VideoCore::UniqueImage{};
@@ -616,6 +624,25 @@ void TemporalUpscaler::CreatePipelines() {
     merge_pipeline = compute(UPSCALE_MERGE_COMP, *merge_pipeline_layout);
     storage_layout(3, reactive_desc_layout, reactive_pipeline_layout, 3 * sizeof(float));
     reactive_pipeline = compute(UPSCALE_REACTIVE_COMP, *reactive_pipeline_layout);
+    {
+        // DLAA animated-object bias: sampled object motion + sampled scene depth -> R8 mask.
+        std::array<vk::DescriptorSetLayoutBinding, 3> bindings{};
+        for (u32 i = 0; i < bindings.size(); ++i) {
+            bindings[i] = {.binding = i,
+                           .descriptorType = i == 2 ? vk::DescriptorType::eStorageImage
+                                                     : vk::DescriptorType::eSampledImage,
+                           .descriptorCount = 1,
+                           .stageFlags = vk::ShaderStageFlagBits::eCompute};
+        }
+        dlss_bias_desc_layout = Check(device.createDescriptorSetLayoutUnique({
+            .flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR,
+            .bindingCount = u32(bindings.size()), .pBindings = bindings.data(),
+        }));
+        dlss_bias_pipeline_layout = Check(device.createPipelineLayoutUnique({
+            .setLayoutCount = 1, .pSetLayouts = &*dlss_bias_desc_layout,
+        }));
+        dlss_bias_pipeline = compute(DLSS_BIAS_COMP, *dlss_bias_pipeline_layout);
+    }
     storage_layout(2, taa_sharpen_desc_layout, taa_sharpen_pipeline_layout, sizeof(float));
     taa_sharpen_pipeline = compute(TAA_SHARPEN_COMP, *taa_sharpen_pipeline_layout);
     taa_sharpen_ldr_pipeline = compute(TAA_SHARPEN_LDR_COMP, *taa_sharpen_pipeline_layout);
@@ -2158,6 +2185,56 @@ bool TemporalUpscaler::UseDlss() const {
            !dlss_failed;
 }
 
+bool TemporalUpscaler::RecordDlssBias(vk::CommandBuffer cmdbuf, vk::ImageView depth,
+                                     u32 w, u32 h) {
+    const vk::ImageView objects = camera_motion.ObjectMotionView();
+    if (!objects || !dlss_bias_view || !dlss_bias_pipeline) {
+        return false;
+    }
+    const vk::Image image = vk::Image(dlss_bias_image);
+    const vk::ImageMemoryBarrier2 begin{
+        .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+        .srcAccessMask = vk::AccessFlagBits2::eNone,
+        .dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+        .dstAccessMask = vk::AccessFlagBits2::eShaderWrite,
+        .oldLayout = vk::ImageLayout::eUndefined,
+        .newLayout = vk::ImageLayout::eGeneral,
+        .image = image,
+        .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
+    };
+    cmdbuf.pipelineBarrier2({.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &begin});
+    const vk::DescriptorImageInfo object_info{.imageView = objects,
+                                               .imageLayout = vk::ImageLayout::eGeneral};
+    const vk::DescriptorImageInfo depth_info{.imageView = depth,
+                                              .imageLayout = vk::ImageLayout::eGeneral};
+    const vk::DescriptorImageInfo bias_info{.imageView = *dlss_bias_view,
+                                             .imageLayout = vk::ImageLayout::eGeneral};
+    const std::array<vk::WriteDescriptorSet, 3> writes{{
+        {.dstBinding = 0, .descriptorCount = 1,
+         .descriptorType = vk::DescriptorType::eSampledImage, .pImageInfo = &object_info},
+        {.dstBinding = 1, .descriptorCount = 1,
+         .descriptorType = vk::DescriptorType::eSampledImage, .pImageInfo = &depth_info},
+        {.dstBinding = 2, .descriptorCount = 1,
+         .descriptorType = vk::DescriptorType::eStorageImage, .pImageInfo = &bias_info},
+    }};
+    cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, *dlss_bias_pipeline);
+    cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, *dlss_bias_pipeline_layout,
+                                0, writes);
+    cmdbuf.dispatch((w + 7) / 8, (h + 7) / 8, 1);
+    const vk::ImageMemoryBarrier2 done{
+        .srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+        .srcAccessMask = vk::AccessFlagBits2::eShaderWrite,
+        .dstStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+        .dstAccessMask = vk::AccessFlagBits2::eMemoryRead,
+        .oldLayout = vk::ImageLayout::eGeneral,
+        .newLayout = vk::ImageLayout::eGeneral,
+        .image = image,
+        .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
+    };
+    cmdbuf.pipelineBarrier2({.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &done});
+    return true;
+}
+
 bool TemporalUpscaler::RecordDlss(vk::CommandBuffer cmdbuf, const Dlss::Resource& color,
                                   const Dlss::Resource& depth, u32 w, u32 h, u32 ow, u32 oh,
                                   float frame_ms, bool hdr) {
@@ -2175,6 +2252,19 @@ bool TemporalUpscaler::RecordDlss(vk::CommandBuffer cmdbuf, const Dlss::Resource
         // The jitter and motion vectors FSR 3 gets: render pixels, current to previous.
         const float sign = BbToggle::Disabled(1u << 26) ? -1.0f : 1.0f;
         const auto& settings = BbSettings::Get();
+        Dlss::Resource bias{};
+        const char* bias_setting = std::getenv("BB_DLAA_BIAS");
+        if (desc.quality == 0 && dlss->SupportsBias() &&
+            !(bias_setting && bias_setting[0] == '0') &&
+            RecordDlssBias(cmdbuf, depth.view, w, h)) {
+            bias = {vk::Image(dlss_bias_image), *dlss_bias_view, vk::Format::eR8Unorm,
+                    vk::ImageAspectFlagBits::eColor, w, h};
+            static bool reported = false;
+            if (!reported) {
+                std::printf("DLAA: animated-object history bias enabled (BB_DLAA_BIAS=0 disables)\n");
+                reported = true;
+            }
+        }
         ok = dlss->Evaluate(cmdbuf, {
             .color = color,
             .depth = depth,
@@ -2187,6 +2277,7 @@ bool TemporalUpscaler::RecordDlss(vk::CommandBuffer cmdbuf, const Dlss::Resource
             .reset = reset,
             .frame_ms = frame_ms,
             .sharpness = settings.sharpen ? std::min(settings.sharpness.load(), 1.0f) : 0.0f,
+            .bias = bias,
         });
     }
     if (!ok) {
