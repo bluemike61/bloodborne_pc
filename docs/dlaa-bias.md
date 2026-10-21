@@ -1,7 +1,8 @@
 # Experimental DLAA animated-object history bias
 
 The Windows DLSS bridge supports NVIDIA's native-resolution DLAA. The game requests
-**Preset K** for DLAA. DLAA uses the existing camera and G-buffer object motion vectors
+**Preset K** for DLAA by default; `BB_DLAA_PRESET` can switch the request for
+controlled comparisons. DLAA uses the existing camera and G-buffer object motion vectors
 and the existing jitter sequence. Disabling either can make character trails worse.
 
 ## Character ghosting mitigation
@@ -20,13 +21,20 @@ The mask is omitted when object vectors are unavailable. FSR and TAA do not use 
 
 ## Settings (process startup)
 
+- `BB_DLAA_PRESET=K` (default): explicitly request transformer Preset K (11)
+  for DLAA. Use `BB_DLAA_PRESET=J` to request Preset J (10), which NVIDIA
+  describes as potentially less ghosting at the cost of more flicker, or
+  `BB_DLAA_PRESET=default` to let NGX choose. Other DLSS quality modes still
+  request the driver default. Restart the game after changing this setting;
+  the log reports the *requested* preset, not proof of which model was loaded.
 - `BB_DLAA_BIAS=1` (default): enable the current-color mask where object
   motion is available.
 - `BB_DLAA_BIAS=0`: turn off the entire mask pass for an A/B comparison.
 - `BB_DLAA_BIAS_STRENGTH=1.0` (default): multiply the mask by this factor.
   The accepted range is `0.0`–`2.0`; invalid values fall back to `1.0`.
   Increase it if trails remain, or reduce it if textures flicker or soften.
-  The shader clamps the final mask to `[0,1]`.
+  The shader clamps the final mask to `[0,1]`. `0.0` skips the bias dispatch
+  entirely to save GPU work.
 - `BB_OBJECT_MOTION=1` and `BB_JITTER=1`: retain geometry motion and
   camera jitter; these are important inputs rather than fixes to disable.
 
@@ -54,6 +62,22 @@ For a controlled comparison, use the same scene and settings with
 `BB_DLAA_BIAS=0` and `1`. Record both ghosting and frame time, especially
 at high output resolutions. The Vulkan shader is built by `bash build.sh`,
 not by the bridge script.
+
+## Important SDK caveat and A/B tests
+
+NVIDIA's 2026 DLSS Programming Guide (section 3.15, "Biasing the Current
+Frame") says the optional bias-current-color buffer is **not supported by the
+newer models** and should not be used; it notes legacy Preset F support.
+Therefore the mask being submitted to NGX with Preset K does **not** prove it is
+being used by that model. Any perceived improvement may be caused by the preset,
+motion inputs, scene variation, or the driver. Retain the experimental path for
+comparisons, but do not claim that Preset K officially supports it.
+
+Run the same area and character animation four ways: K with bias enabled,
+K with bias disabled, J with bias enabled, and J with bias disabled. Use
+identical resolutions, jitter, object motion and graphics settings, and compare
+both ghosting and texture flicker. Test the driver default separately if helpful.
+Because the settings are read at startup, restart between runs.
 
 ## Limitations
 
