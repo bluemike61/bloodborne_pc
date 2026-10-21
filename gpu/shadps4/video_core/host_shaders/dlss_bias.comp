@@ -9,7 +9,8 @@ layout(local_size_x = 8, local_size_y = 8) in;
 // Object-motion attachment: RG = current-to-previous motion in render pixels;
 // B = object-vector validity; A = depth recorded when the object was drawn.
 layout(binding = 0) uniform texture2D objects;
-layout(binding = 1, r8) uniform writeonly image2D bias;
+layout(binding = 1) uniform texture2D scene_depth;
+layout(binding = 2, r8) uniform writeonly image2D bias;
 
 void main() {
     const ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
@@ -25,7 +26,12 @@ void main() {
         for (int x = -1; x <= 1; ++x) {
             const ivec2 neighbour = clamp(pixel + ivec2(x, y), ivec2(0), size - 1);
             const vec4 object = texelFetch(objects, neighbour, 0);
-            if (object.b < 0.99 || any(isnan(object.rg)) || any(isinf(object.rg))) {
+            // Reject motion from a pixel later covered by another (untracked)
+            // draw, using the same depth test as camera_motion.comp.
+            const float depth = texelFetch(scene_depth, neighbour, 0).r;
+            const float depth_threshold = max(2e-7, (1.00002 - depth) * 0.01);
+            if (object.b < 0.99 || abs(object.a - depth) >= depth_threshold ||
+                any(isnan(object.rg)) || any(isinf(object.rg))) {
                 continue;
             }
             const float speed = length(object.rg);
