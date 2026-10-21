@@ -52,5 +52,6 @@ private:
     // Shape candidates, deferred blend locations, blend items, counters and indirect args.
     std::array<Buffer, 5> buffers{};
     u32 current_width = 0, current_height = 0;
+    bool reported_dispatch = false;
 };
 } // namespace Vulkan
