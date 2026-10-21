@@ -63,6 +63,67 @@ For a controlled comparison, use the same scene and settings with
 at high output resolutions. The Vulkan shader is built by `bash build.sh`,
 not by the bridge script.
 
+## Motion-vector correctness experiments
+
+The character's G-buffer skeleton draw already stores and reuses clip-space
+vertex positions. It supplies pixel-space current-to-previous motion to DLAA;
+the camera motion shader fills in other scene pixels.
+
+The following changes are on the DLAA test branch:
+
+- **Unreadable small bone palettes:** when a selected small-skeleton vertex
+  shader's bone palette cannot be accessed for hashing, the rasterizer now
+  records object positions instead of assuming a constant palette means the
+  weapon/prop is motionless. This is a correctness fix, but has not been
+  benchmarked or visually validated on an RTX 3080.
+- **Behind-previous-camera reprojection:** `camera_motion.comp` rejects motion
+  derived from geometry behind the previous camera or non-finite/extreme
+  reprojections. It sends a finite, off-screen vector instead of overflowing
+  the R16G16 motion texture. This should prevent invalid temporal reads during
+  large camera changes. In-game validation is still required.
+- **`BB_OBJECT_MOTION_SMALL=1` (opt-in):** bypass the static-palette gate on
+  selected small-skeleton geometry. It can help rigidly animated weapons,
+  accessories, and props whose model transform moves without changing the bone
+  palette. It may increase vertex work and VRAM bandwidth: compare frame rate
+  and ghosting before making it a default. `BB_OBJECT_MOTION_ALL=1` is broader
+  and may be substantially more expensive.
+- **`BB_MOTION_INDEX_STRICT=1` (opt-in):** verify the indexed geometry's
+  range/topology at least once per frame, instead of reusing it for up to
+  32 frames. Prevents incorrect previous-vertex matches if a buffer is rewritten
+  with new indices at the same address; it adds CPU hashing/scanning overhead.
+  Test this separately from the small-skeleton option. Most skinned meshes
+  use stable index buffers and should not need it.
+
+`BB_OBJECT_MOTION_SMALL` and `BB_MOTION_INDEX_STRICT` both default to off.
+They only matter with `BB_OBJECT_MOTION=1`.
+
+### Suggested test order
+
+1. Keep `BB_DLAA_PRESET=K BB_DLAA_BIAS=0 BB_OBJECT_MOTION=1 BB_JITTER=1`
+   with both new experimental flags off. Record a short repeatable walking,
+   attack and camera-pan test at native resolution and its approximate FPS.
+2. Repeat with **only** `BB_OBJECT_MOTION_SMALL=1`. Look for weapon, cape and
+   accessory trails, and note any performance impact.
+3. Repeat with **only** `BB_MOTION_INDEX_STRICT=1`. If it helps, inspect
+   `BB_FRAME_STATS=1` object-motion statistics and investigate index-buffer
+   write frequency before enabling it by default.
+
+`BB_MOTION_SELECT_LOG=1` can identify which G-buffer vertex shaders are
+instrumented; it cannot guarantee every visible character layer has correct
+motion. The game's debug motion view is useful for checking the actual vectors.
+The main character's full skeleton shaders do not use small-skeleton gating,
+so the opt-in option may primarily affect accessories rather than the torso.
+
+After building, run the CPU regression test for index-history behavior:
+
+```bash
+ninja -C out/gpu motion-history-test
+./out/gpu/motion-history-test.exe
+```
+
+`bash build.sh` recompiles `camera_motion.comp` as a host shader. These
+changes do not alter the DLSS DLL ABI, so an already-working bridge can be reused.
+
 ## Important SDK caveat and A/B tests
 
 NVIDIA's 2026 DLSS Programming Guide (section 3.15, "Biasing the Current
