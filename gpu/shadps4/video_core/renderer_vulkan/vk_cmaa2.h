@@ -53,5 +53,11 @@ private:
     std::array<Buffer, 5> buffers{};
     u32 current_width = 0, current_height = 0;
     bool reported_dispatch = false;
+    // Opt-in BB_CMAA2_DIAGNOSTICS: staging readback for candidate and blend counts.
+    Buffer diagnostics{};
+    void* diagnostics_mapped = nullptr;
+    bool diagnostics_enabled = false;
+    bool diagnostics_pending = false;
+    u32 diagnostics_frames = 0;
 };
 } // namespace Vulkan
