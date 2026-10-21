@@ -181,6 +181,8 @@ private:
     /// bbport: DLSS selected and the bridge is ready (NVIDIA RTX, bbport_dlss.dll).
     [[nodiscard]] bool UseDlss() const;
     /// Records DLSS into `cmdbuf` (output in General). `hdr`: linear scene color input.
+    /// Writes an R8 bias mask where animated geometry needs less temporal history.
+    bool RecordDlssBias(vk::CommandBuffer cmdbuf, vk::ImageView depth, u32 w, u32 h);
     bool RecordDlss(vk::CommandBuffer cmdbuf, const Dlss::Resource& color,
                     const Dlss::Resource& depth, u32 w, u32 h, u32 ow, u32 oh, float frame_ms,
                     bool hdr);
@@ -276,6 +278,12 @@ private:
     VideoCore::UniqueImage reactive_image; ///< R8 reactive mask
     vk::UniqueImageView opaque_view;
     vk::UniqueImageView reactive_view;
+    // Only DLAA consumes this bias image; other upscalers remain unchanged.
+    VideoCore::UniqueImage dlss_bias_image;
+    vk::UniqueImageView dlss_bias_view;
+    vk::UniqueDescriptorSetLayout dlss_bias_desc_layout;
+    vk::UniquePipelineLayout dlss_bias_pipeline_layout;
+    vk::UniquePipeline dlss_bias_pipeline;
     vk::UniqueDescriptorSetLayout reactive_desc_layout;
     vk::UniquePipelineLayout reactive_pipeline_layout;
     vk::UniquePipeline reactive_pipeline;
