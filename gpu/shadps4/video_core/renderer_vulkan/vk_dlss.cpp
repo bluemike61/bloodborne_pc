@@ -236,10 +236,10 @@ bool Dlss::CreateFeature(vk::CommandBuffer command, const FeatureDesc& desc) {
             } else if (name == "default" || name == "DEFAULT" || name == "0") {
                 preset = 0;
             } else if (name != "K" && name != "k" && name != "11") {
-                std::printf("DLAA: unrecognized BB_DLAA_PRESET='%s'; using K\\n", choice);
+                std::printf("DLAA: unrecognized BB_DLAA_PRESET='%s'; using K\n", choice);
             }
         }
-        std::printf("DLAA: requesting NVIDIA preset %s (BB_DLAA_PRESET=K/J/default)\\n",
+        std::printf("DLAA: requesting NVIDIA preset %s (BB_DLAA_PRESET=K/J/default)\n",
                     preset == PresetK ? "K" : preset == PresetJ ? "J" : "driver default");
     }
     const BbDlssFeature feature{desc.input_width,  desc.input_height, desc.output_width,
