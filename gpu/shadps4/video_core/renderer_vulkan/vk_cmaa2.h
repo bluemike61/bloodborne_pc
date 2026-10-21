@@ -4,8 +4,8 @@
 
 #include <array>
 #include <cstdint>
-#include <vk_mem_alloc.h>
 #include "video_core/renderer_vulkan/vk_common.h"
+#include <vk_mem_alloc.h>
 #include "video_core/texture_cache/image.h"
 
 namespace Vulkan {
