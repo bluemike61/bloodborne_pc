@@ -204,6 +204,10 @@ bool Dlss::Available() const {
     return impl->available;
 }
 
+bool Dlss::SupportsBias() const {
+    return impl->available && impl->api && impl->api->abi >= 3;
+}
+
 std::string Dlss::Problem() const {
     return impl->problem;
 }
@@ -338,6 +342,9 @@ void Dlss::Initialize(vk::Instance, vk::PhysicalDevice, vk::Device) {}
 void Dlss::Disable(std::string_view) {}
 void Dlss::Shutdown() {}
 bool Dlss::Available() const {
+    return false;
+}
+bool Dlss::SupportsBias() const {
     return false;
 }
 std::string Dlss::Problem() const {
