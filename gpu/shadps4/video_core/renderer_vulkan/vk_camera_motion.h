@@ -107,6 +107,7 @@ private:
     vk::UniquePipeline motion_pipeline;
 
     ObjectMotion* object_motion = nullptr;
+    bool object_motion_ready = false; ///< Object vectors were actually drawn at this render size.
     Camera current, previous;
     bool frame_has_camera = false;
     std::array<float, 2> jitter{}, previous_jitter{};
