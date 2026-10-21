@@ -83,6 +83,20 @@ void Cmaa2Pass::CreatePipelines() {
             device.destroyShaderModule(module);
         }
     }
+    if (std::getenv("BB_CMAA2_DEBUG_APPLY")) {
+        // Only create this extra pipeline when explicitly debugging. The normal
+        // LDR final-apply shader and all HDR variants remain unchanged.
+        const auto module = CompileSPV(CMAA2_LDR_APPLY_DEBUG, device);
+        const vk::ComputePipelineCreateInfo ci{
+            .stage = {.stage = vk::ShaderStageFlagBits::eCompute,
+                      .module = module, .pName = "DeferredColorApply2x2CS"},
+            .layout = *pipeline_layout,
+        };
+        debug_ldr_apply_pipeline = Check<"create CMAA2 magenta final-apply pipeline">(
+            device.createComputePipelineUnique({}, ci));
+        device.destroyShaderModule(module);
+        std::printf("CMAA2 DEBUG APPLY: LDR blended pixels will be magenta\n");
+    }
 }
 
 void Cmaa2Pass::DestroyBuffers() {
@@ -268,7 +282,10 @@ bool Cmaa2Pass::Record(vk::CommandBuffer cmd, vk::Image input, vk::ImageView inp
     cmd.pipelineBarrier2({.memoryBarrierCount = 1, .pMemoryBarriers = &read_after_transfer});
     const u32 mode = format == vk::Format::eR16G16B16A16Sfloat ? 0 : 1;
     const auto bind = [&](u32 pass) {
-        cmd.bindPipeline(vk::PipelineBindPoint::eCompute, *pipelines[mode][pass]);
+        const vk::Pipeline pipeline =
+            (mode == 1 && pass == 3 && debug_ldr_apply_pipeline)
+                ? *debug_ldr_apply_pipeline : *pipelines[mode][pass];
+        cmd.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline);
         cmd.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, *pipeline_layout, 0, writes);
     };
     const auto sync = [&] {
