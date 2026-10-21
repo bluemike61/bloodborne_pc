@@ -1092,6 +1092,12 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
                     memory->ClampRangeSize(index_address, bytes) == bytes) {
                     const bool restart = regs.enable_primitive_restart != 0;
                     const u32 count = regs.num_indices;
+                    // Experimental correctness/performance tradeoff: dynamic geometry can
+                    // replace index contents at the same address between cache checks.
+                    static const bool strict_indices = [] {
+                        const char* value = std::getenv("BB_MOTION_INDEX_STRICT");
+                        return value && value[0] == '1';
+                    }();
                     const auto scanned = object_motion->IndexRange(
                         {index_address, count, index_size, s32(base_vertex), restart}, [&] {
                             const auto* data = reinterpret_cast<const void*>(index_address);
@@ -1105,7 +1111,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
                                           s32(base_vertex), restart);
                             return Motion::IndexRangeCache::Result{scan_range,
                                                                    XXH3_64bits(data, bytes)};
-                        });
+                        }, strict_indices);
                     range = scanned.range;
                     topology = scanned.topology;
                 }
