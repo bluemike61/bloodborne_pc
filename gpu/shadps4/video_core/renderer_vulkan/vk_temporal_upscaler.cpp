@@ -2253,6 +2253,14 @@ bool TemporalUpscaler::RecordDlss(vk::CommandBuffer cmdbuf, const Dlss::Resource
         const float sign = BbToggle::Disabled(1u << 26) ? -1.0f : 1.0f;
         const auto& settings = BbSettings::Get();
         Dlss::Resource bias{};
+        if (desc.quality == 0 && !dlss->SupportsBias()) {
+            static bool reported_old_bridge = false;
+            if (!reported_old_bridge) {
+                std::printf("DLAA: bias unavailable; rebuild bbport_dlss.dll with "
+                            "packaging/windows/build_dlss.sh\n");
+                reported_old_bridge = true;
+            }
+        }
         const char* bias_setting = std::getenv("BB_DLAA_BIAS");
         if (desc.quality == 0 && dlss->SupportsBias() &&
             !(bias_setting && bias_setting[0] == '0') &&
