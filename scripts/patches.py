@@ -152,7 +152,7 @@ def render_size(settings,override=''):
     if override:
         w,h=(int(v) for v in override.lower().split('x'))
         return (w,h)
-    if settings.get('upscaler','fsr3')=='off': return None
+    if settings.get('upscaler','fsr3') in ('off','taa','cmaa2'): return None
     preset=int(settings.get('preset','0') or 0)
     scale=PRESET_SCALES[max(0,min(preset,len(PRESET_SCALES)-1))]
     if scale==1.0: return None
@@ -175,9 +175,9 @@ def scaled_sizes(settings):
     the game renders at output / preset scale (or at the output size without upscaler) and the
     upscaler fills the output. None at 1080p and for TAA (native, live host targets only)."""
     out=output_size(settings)
-    if out==OUTPUT_SIZE or (settings.get('upscaler')=='taa' and out[0]*9==out[1]*16): return None
+    if out==OUTPUT_SIZE or (settings.get('upscaler') in ('taa','cmaa2') and out[0]*9==out[1]*16): return None
     scale=1.0
-    if settings.get('upscaler','fsr3') not in ('off','taa'):
+    if settings.get('upscaler','fsr3') not in ('off','taa','cmaa2'):
         preset=int(settings.get('preset','0') or 0)
         scale=PRESET_SCALES[max(0,min(preset,len(PRESET_SCALES)-1))]
     render=tuple(max(2,round(v/scale/2)*2) for v in out)

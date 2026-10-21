@@ -189,7 +189,7 @@ typedef struct {
     int count;
 } Section;
 
-static const Option UPSCALERS[] = {{0, 117100}, {1, 117101}, {2, 117102}, {3, 117103}, {4, 117104}, {5, 117105}};
+static const Option UPSCALERS[] = {{0, 117100}, {1, 117101}, {2, 117102}, {3, 117103}, {4, 117104}, {5, 117105}, {6, 117106}};
 static const Option PRESETS[] = {{0, 117110}, {1, 117111}, {2, 117112}, {3, 117113}, {4, 117114}};
 /* The 16:9 outputs and the two common ultrawide ones; the other ultrawide outputs show only
  * while chosen (from the launcher), so the list stays as short as the others. Values index

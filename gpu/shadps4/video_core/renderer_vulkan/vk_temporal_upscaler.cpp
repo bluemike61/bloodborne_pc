@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "video_core/renderer_vulkan/vk_temporal_upscaler.h"
+#if BB_HAS_CMAA2
+#include "video_core/renderer_vulkan/vk_cmaa2.h"
+#endif
 #include "video_core/renderer_vulkan/vk_gpu_profiler.h"
 #include "video_core/renderer_vulkan/motion_history.h"
 #include "video_core/renderer_vulkan/vk_scene_resolution.h"
@@ -166,6 +169,7 @@ TemporalUpscaler::TemporalUpscaler(const Instance& instance_, Scheduler& schedul
     BbSettings::ConfigureUpscalerSupport(instance.IsFsr4Int8Supported(),
                                          instance.IsFsr411Supported());
     fsr4 = std::make_unique<Fsr4Upscaler>(instance, scheduler);
+    BbSettings::ConfigureCmaa2Support(BB_HAS_CMAA2 != 0);
     {
         const Dlss* dlss = Dlss::Get();
         static std::string problem;
@@ -233,6 +237,7 @@ bool TemporalUpscaler::Active() const {
            (BbSettings::Get().upscaler == BbSettings::UpscalerFsr3 ||
             BbSettings::IsFsr4(BbSettings::Get().upscaler) ||
             BbSettings::Get().upscaler == BbSettings::UpscalerTaa ||
+            BbSettings::Get().upscaler == BbSettings::UpscalerCmaa2 ||
             BbSettings::Get().upscaler == BbSettings::UpscalerDlss) &&
            !BbToggle::Disabled(1u << 24);
 }
@@ -240,7 +245,8 @@ bool TemporalUpscaler::Active() const {
 bool TemporalUpscaler::ReactiveOn() const {
     // FSR 4 takes no reactive mask: the opaque snapshot and the mask pass would be wasted.
     return BbSettings::Get().reactive && !BbToggle::Disabled(1u << 27) && !UseFsr4() && !UseDlss() &&
-           BbSettings::Get().upscaler != BbSettings::UpscalerTaa;
+           BbSettings::Get().upscaler != BbSettings::UpscalerTaa &&
+           BbSettings::Get().upscaler != BbSettings::UpscalerCmaa2;
 }
 
 void TemporalUpscaler::OnSceneColor(VideoCore::ImageId color) {
@@ -295,7 +301,8 @@ bool TemporalUpscaler::OnFrameStart() {
     const int preset = BbSettings::RenderPreset();
     if (applied_preset != preset || settings.upscaler == BbSettings::UpscalerOff) failed = false;
     const bool active = Active();
-    const bool jitter_on = active && settings.jitter && !BbToggle::Disabled(1u << 25);
+    const bool jitter_on = active && settings.upscaler != BbSettings::UpscalerCmaa2 &&
+                           settings.jitter && !BbToggle::Disabled(1u << 25);
     const int upscaler = settings.upscaler.load();
     const int output = BbSettings::AspectNeedsRestart() ? settings.startup_output_res : settings.output_res.load();
     const bool output_changed = !scaled_session && applied_output != output;
@@ -385,12 +392,14 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
     // DLSS, like FSR 4, has its own context: no portable FSR 3 context is made.
     const bool use_fsr4 = UseFsr4() || UseDlss();
     const bool use_taa = BbSettings::Get().upscaler == BbSettings::UpscalerTaa;
-    if (use_taa && (w != ow || h != oh)) {
-        std::printf("TAA: remove BB_RENDER_RES to use native-resolution TAA\n");
+    const bool use_cmaa2 = BbSettings::Get().upscaler == BbSettings::UpscalerCmaa2;
+    if ((use_taa || use_cmaa2) && (w != ow || h != oh)) {
+        std::printf("Native AA: remove BB_RENDER_RES and select native resolution\n");
         return false;
     }
     if (resources_ready && w == width && h == height && ow == out_width && oh == out_height &&
-        hdr == context_hdr && use_fsr4 == resources_fsr4 && use_taa == resources_taa) {
+        hdr == context_hdr && use_fsr4 == resources_fsr4 && use_taa == resources_taa &&
+        use_cmaa2 == resources_cmaa2) {
         return true;
     }
     const auto device = instance.GetDevice();
@@ -429,7 +438,7 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
     create_info.maxRenderSize = {w, h};
     create_info.maxOutputSize = {ow, oh};
     // FSR 4 has its own model context (vk_fsr4); the images below are shared.
-    if (!use_fsr4 && !use_taa) {
+    if (!use_fsr4 && !use_taa && !use_cmaa2) {
         if (const u64 issues = ffxVkPortableValidateUpscaleCreateInfo(&create_info)) {
             PrintIssues("create info", issues);
             return false;
@@ -467,7 +476,8 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
         .samples = vk::SampleCountFlagBits::e1,
         .tiling = vk::ImageTiling::eOptimal,
         .usage = vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled |
-                 vk::ImageUsageFlagBits::eTransferSrc,
+                 vk::ImageUsageFlagBits::eTransferSrc |
+                 vk::ImageUsageFlagBits::eTransferDst,
         .initialLayout = vk::ImageLayout::eUndefined,
     });
     output_view = Check(device.createImageViewUnique({
@@ -530,6 +540,12 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
     resources_ready = true;
     resources_fsr4 = use_fsr4;
     resources_taa = use_taa;
+    resources_cmaa2 = use_cmaa2;
+    if (use_cmaa2) {
+        std::printf("CMAA2: spatial AA %ux%u (%s), no temporal history\n", w, h,
+                    hdr ? "HDR scene color" : "LDR scene");
+        return true;
+    }
     if (use_taa) {
         std::printf("TAA: context %ux%u -> %ux%u (%s), no FSR model\n", w, h, ow, oh,
                     hdr ? "HDR scene color" : "tonemapped frame");
@@ -1034,6 +1050,12 @@ void TemporalUpscaler::Run() {
     const auto color_view =
         CachedView(color, vk::Format::eR16G16B16A16Sfloat, vk::ImageAspectFlagBits::eColor);
 
+#if BB_HAS_CMAA2
+    if (BbSettings::Get().upscaler == BbSettings::UpscalerCmaa2) {
+        if (!cmaa2) cmaa2 = std::make_unique<Cmaa2Pass>(instance, scheduler);
+        cmaa2->Prepare(w, h);
+    }
+#endif
     scheduler.EndRendering();
     runtime.Transit(&depth, vk::ImageLayout::eGeneral, vk::PipelineStageFlagBits2::eComputeShader,
                     vk::AccessFlagBits2::eShaderRead);
@@ -1098,6 +1120,13 @@ void TemporalUpscaler::Run() {
     if (BbSettings::Get().upscaler == BbSettings::UpscalerTaa) {
         RecordTaa(cmdbuf, input_color_view, input_depth_view);
         dispatched = true;
+    } else if (BbSettings::Get().upscaler == BbSettings::UpscalerCmaa2) {
+#if BB_HAS_CMAA2
+        dispatched = bool(color.usage_flags & vk::ImageUsageFlagBits::eTransferSrc) &&
+                     cmaa2->Record(cmdbuf, input_color, input_color_view,
+                                   vk::Image(output_image), *output_view, w, h,
+                                   vk::Format::eR16G16B16A16Sfloat);
+#endif
     } else if (UseFsr4()) {
         dispatched = RecordFsr4(cmdbuf, {input_color, input_color_view, w, h},
                                 {input_depth, input_depth_view, w, h}, w, h, ow, oh, frame_ms);
@@ -1179,7 +1208,8 @@ void TemporalUpscaler::Run() {
     if (dispatched) {
         reset = false;
         dispatched_last_frame = true;
-        if (BbSettings::Get().upscaler != BbSettings::UpscalerTaa) {
+        if (BbSettings::Get().upscaler != BbSettings::UpscalerTaa &&
+            BbSettings::Get().upscaler != BbSettings::UpscalerCmaa2) {
             ExtraSharpen(cmdbuf, vk::Image(output_image), false, ow, oh);
         }
         // The result replaces the scene color's RGB (its alpha carries data for the post).
@@ -1746,6 +1776,12 @@ void TemporalUpscaler::RunScaled() {
         runtime.FlushBarriers();
     }
 
+#if BB_HAS_CMAA2
+    if (BbSettings::Get().upscaler == BbSettings::UpscalerCmaa2) {
+        if (!cmaa2) cmaa2 = std::make_unique<Cmaa2Pass>(instance, scheduler);
+        cmaa2->Prepare(w, h);
+    }
+#endif
     scheduler.EndRendering();
     const auto cmdbuf = scheduler.CommandBuffer();
     const auto barrier = [&](vk::Image image, vk::ImageAspectFlags aspect,
@@ -1771,6 +1807,34 @@ void TemporalUpscaler::RunScaled() {
     // The previous frame's display pass read it: all commands before.
     barrier(vk::Image(ui_image), vk::ImageAspectFlagBits::eColor, vk::ImageLayout::eUndefined,
             all, vk::AccessFlagBits2::eNone, vk::ImageLayout::eGeneral, all, rw);
+    if (BbSettings::Get().upscaler == BbSettings::UpscalerCmaa2) {
+        bool ok = false;
+#if BB_HAS_CMAA2
+        if (w == ow && h == oh &&
+            color.info.pixel_format == vk::Format::eR8G8B8A8Unorm &&
+            (color.usage_flags & vk::ImageUsageFlagBits::eTransferSrc)) {
+            const auto target_view = Mirror(vk::Image(ui_image), ui_views,
+                                            color.info.pixel_format, {});
+            ok = cmaa2->Record(cmdbuf, color_image, color_view, vk::Image(ui_image),
+                               target_view, w, h, color.info.pixel_format);
+        }
+#endif
+        barrier(vk::Image(ui_image), vk::ImageAspectFlagBits::eColor,
+                vk::ImageLayout::eGeneral, all, rw, vk::ImageLayout::eGeneral,
+                vk::PipelineStageFlagBits2::eColorAttachmentOutput, color_access);
+        done_this_frame = true;
+        if (ok) {
+            reset = false;
+            dispatched_last_frame = true;
+            ui_phase = true;
+            ui_color = ldr_target;
+            ui_depth = camera_motion.Depth();
+        } else {
+            failed = true;
+            std::printf("CMAA2: unsupported LDR image or dimensions, disabled\n");
+        }
+        return;
+    }
     barrier(vk::Image(motion_image), vk::ImageAspectFlagBits::eColor, vk::ImageLayout::eUndefined,
             all, vk::AccessFlagBits2::eNone, vk::ImageLayout::eGeneral,
             vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eShaderWrite);

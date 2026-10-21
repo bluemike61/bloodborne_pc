@@ -576,14 +576,16 @@ void SettingsTab() {
     PageTitle("Visual settings");
     Section("Temporal upscaling");
     static const char* upscalers[] = {"Off", "FSR 3.1", "FSR 4 (INT8)", "FSR 4.1.1 (INT8)",
-                                     "TAA (native anti-aliasing)", "DLSS (NVIDIA RTX)"};
+                                     "TAA (native anti-aliasing)", "DLSS (NVIDIA RTX)",
+                                     "CMAA2 (native spatial AA)"};
     static const char* later[] = {"XeSS"};
     int upscaler = s.upscaler;
     if (ComboRow("Upscaler", upscalers[upscaler])) {
         for (int i = 0; i < BbSettings::UpscalerCount; ++i) {
             const bool supported = i == BbSettings::UpscalerFsr4 ? s.fsr4_supported.load()
                 : i == BbSettings::UpscalerFsr411 ? s.fsr411_supported.load()
-                : i == BbSettings::UpscalerDlss   ? s.dlss_supported.load() : true;
+                : i == BbSettings::UpscalerDlss   ? s.dlss_supported.load()
+                : i == BbSettings::UpscalerCmaa2 ? s.cmaa2_supported.load() : true;
             ImGui::BeginDisabled(!supported);
             if (ImGui::Selectable(upscalers[i], i == upscaler)) {
                 Store(s.upscaler, i, true);
@@ -622,7 +624,8 @@ void SettingsTab() {
         Hint("Ghosting diagnostics: FSR 4 uses exposure to normalize color and decide when to discard history. These options apply immediately.");
     }
     const bool upscaler_on = s.upscaler != BbSettings::UpscalerOff;
-    const bool taa = s.upscaler == BbSettings::UpscalerTaa;
+    const bool taa = s.upscaler == BbSettings::UpscalerTaa ||
+                     s.upscaler == BbSettings::UpscalerCmaa2;
     ImGui::BeginDisabled(!upscaler_on);
     ImGui::BeginDisabled(taa);
     int preset = taa ? BbSettings::NativeAA : s.preset.load();
@@ -646,7 +649,7 @@ void SettingsTab() {
     }
     ImGui::EndDisabled();
     if (taa) {
-        Note("TAA smooths the scene at output resolution without FSR upscaling. The saved upscaling preset returns when you select an upscaler.");
+        Note("Native AA renders at output resolution. TAA uses temporal history; CMAA2 is a spatial edge filter without jitter or history.");
     }
     InfoRow("Active scene resolution", "%d x %d", s.active_render_width.load(),
             s.active_render_height.load());
@@ -835,7 +838,8 @@ void ImageToolsTab() {
         Hint("Provider checks for FSR 4. These changes apply immediately.");
     }
     const bool temporal = s.upscaler != BbSettings::UpscalerOff &&
-                          s.upscaler != BbSettings::UpscalerTaa;
+                          s.upscaler != BbSettings::UpscalerTaa &&
+                          s.upscaler != BbSettings::UpscalerCmaa2;
     ImGui::BeginDisabled(!temporal);
     Checkbox("Reactive mask", s.reactive);
     ImGui::BeginDisabled(!s.reactive);
@@ -1457,6 +1461,7 @@ void FpsCounter() {
                 : s.upscaler == BbSettings::UpscalerFsr4 ? "FSR 4"
                 : s.upscaler == BbSettings::UpscalerFsr411 ? "FSR 4.1.1"
                 : s.upscaler == BbSettings::UpscalerTaa ? "TAA"
+                : s.upscaler == BbSettings::UpscalerCmaa2 ? "CMAA2"
                 : s.upscaler == BbSettings::UpscalerDlss ? "DLSS"
                                                          : "");
     ImGui::End();

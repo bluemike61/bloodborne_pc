@@ -38,6 +38,7 @@ class Runtime;
 class CameraMotion;
 class SceneTargets;
 class FrameGenerator;
+class Cmaa2Pass;
 
 class TemporalUpscaler {
 public:
@@ -265,6 +266,10 @@ private:
     bool resources_ready = false; ///< images below match width/height/out size
     bool resources_fsr4 = false;  ///< made for FSR 4 (no FSR 3 context)
     bool resources_taa = false;
+    bool resources_cmaa2 = false;
+#if BB_HAS_CMAA2
+    std::unique_ptr<Cmaa2Pass> cmaa2;
+#endif
     std::unique_ptr<Fsr4Upscaler> fsr4;
     bool fsr4_failed = false;
     bool dlss_failed = false;

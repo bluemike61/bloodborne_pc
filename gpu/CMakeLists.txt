@@ -87,6 +87,7 @@ if (NOT miniz_FOUND)
 endif()
 find_package(Zydis REQUIRED)
 find_program(GLSLANG_COMPILER NAMES glslang glslangValidator REQUIRED)
+find_program(BB_DXC NAMES dxc dxcompiler)
 
 set(SIRIT_USE_SYSTEM_SPIRV_HEADERS OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/sirit EXCLUDE_FROM_ALL)
@@ -140,6 +141,18 @@ foreach(BPP IN ITEMS 8 16 32 64 96 128)
     add_host_shader(tiling.comp tiling_micro_${BPP}_comp BITS_PER_PIXEL=${BPP} IS_MACRO_TILED=0)
     add_host_shader(tiling.comp tiling_macro_${BPP}_comp BITS_PER_PIXEL=${BPP} IS_MACRO_TILED=1)
 endforeach()
+# Intel CMAA2 is HLSL; DXC's SPIR-V backend is required (glslang cannot compile it).
+# Build remains usable without DXC, but CMAA2 is hidden and cannot be selected.
+if(BB_DXC)
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    set(CMAA2_HEADER ${SHADER_DIR}/cmaa2_spirv.h)
+    add_custom_command(OUTPUT ${CMAA2_HEADER}
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/../tools/build_cmaa2_spirv.py
+                --dxc ${BB_DXC} --output ${CMAA2_HEADER}
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/../tools/build_cmaa2_spirv.py
+        COMMENT "Building Intel CMAA2 Vulkan shaders with DXC" VERBATIM)
+    list(APPEND SHADER_HEADERS ${CMAA2_HEADER})
+endif()
 add_custom_target(host_shaders DEPENDS ${SHADER_HEADERS})
 
 file(GLOB_RECURSE VIDEO_CORE CONFIGURE_DEPENDS shadps4/video_core/*.cpp)
@@ -236,6 +249,11 @@ set_source_files_properties(shim/bbport_overlay.cpp PROPERTIES
     OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/DejaVuSans.ttf)
 target_include_directories(bbgpu PRIVATE shim shadps4 ${SHADER_INCLUDE} third_party/gcn/include third_party/half/include)
 target_compile_definitions(bbgpu PRIVATE BOOST_ASIO_STANDALONE NDEBUG)
+if(BB_DXC)
+    target_compile_definitions(bbgpu PRIVATE BB_HAS_CMAA2=1)
+else()
+    target_compile_definitions(bbgpu PRIVATE BB_HAS_CMAA2=0)
+endif()
 target_compile_options(bbgpu PRIVATE -Wno-deprecated-declarations -Wno-missing-field-initializers)
 # Runtime symbols (runtime_memory_*, runtime_process_*) resolve against bb-probe.
 if (NOT WIN32)

@@ -207,6 +207,15 @@ void ConfigureDlssSupport(bool available, const char* problem) {
     }
 }
 
+void ConfigureCmaa2Support(bool available) {
+    auto& v = Get();
+    v.cmaa2_supported = available;
+    if (v.upscaler == UpscalerCmaa2 && !available) {
+        std::printf("CMAA2 not built (install DXC and rebuild); disabling anti-aliasing mode\n");
+        v.upscaler = UpscalerOff;
+    }
+}
+
 bool FixedRenderSession() {
     const char* size = std::getenv("BB_RENDER_RES");
     return size && size[0];
@@ -215,7 +224,8 @@ bool FixedRenderSession() {
 int RenderPreset() {
     const auto& v = Get();
     return FixedRenderSession() ? v.startup_preset :
-        v.upscaler == UpscalerTaa ? NativeAA : v.preset.load();
+        (v.upscaler == UpscalerTaa || v.upscaler == UpscalerCmaa2)
+            ? NativeAA : v.preset.load();
 }
 
 bool AspectNeedsRestart() {
@@ -231,7 +241,8 @@ bool ResolutionNeedsRestart() {
     return AspectNeedsRestart() || (FixedRenderSession() &&
         (v.preset != v.startup_preset || v.output_res != v.startup_output_res ||
          (v.upscaler == UpscalerOff) != (v.startup_upscaler == UpscalerOff) ||
-         (v.upscaler == UpscalerTaa) != (v.startup_upscaler == UpscalerTaa)));
+         (v.upscaler == UpscalerTaa || v.upscaler == UpscalerCmaa2) !=
+         (v.startup_upscaler == UpscalerTaa || v.startup_upscaler == UpscalerCmaa2)));
 }
 
 void Save() {
@@ -403,6 +414,7 @@ extern "C" int bbgpu_upscaler_supported(int upscaler) {
     case UpscalerFsr4: return v.fsr4_supported.load();
     case UpscalerFsr411: return v.fsr411_supported.load();
     case UpscalerDlss: return v.dlss_supported.load();
+    case UpscalerCmaa2: return v.cmaa2_supported.load();
     default: return upscaler >= 0 && upscaler < UpscalerCount;
     }
 }
@@ -424,7 +436,7 @@ const char* FrameGenName(int frame_gen) {
 }
 
 const char* UpscalerName(int upscaler) {
-    static constexpr const char* names[UpscalerCount] = {"off", "fsr3", "fsr4", "fsr411", "taa", "dlss"};
+    static constexpr const char* names[UpscalerCount] = {"off", "fsr3", "fsr4", "fsr411", "taa", "dlss", "cmaa2"};
     return names[std::clamp(upscaler, 0, UpscalerCount - 1)];
 }
 
