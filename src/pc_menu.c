@@ -858,6 +858,14 @@ int bb_pc_menu_install(void) {
         puts("PC menu: off (BB_PC_MENU=0)");
         return 0;
     }
+    // Troubleshooting: retain the generated menu assets but install none of the
+    // PC menu's code hooks. This separates asset/mod failures from engine-hook
+    // failures without affecting the other optional engine features.
+    const char *hooks = getenv("BB_PC_MENU_HOOKS");
+    if (hooks && !strcmp(hooks, "0")) {
+        puts("PC menu: engine hooks off for diagnostics (BB_PC_MENU_HOOKS=0)");
+        return 0;
+    }
     if (!assets || strcmp(assets, "1")) {
         puts("PC menu: off - its sections and strings were not made (see the Enhancements lines)");
         return 0;
