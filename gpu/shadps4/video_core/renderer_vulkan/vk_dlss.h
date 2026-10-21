@@ -59,6 +59,7 @@ public:
         bool reset;
         float frame_ms;
         float sharpness;
+        Resource bias{}; ///< Optional R8 current-color history bias for DLAA (ABI 3).
     };
 
     /// DLSS quality mode for an output/render size ratio (0 DLAA .. 4 Ultra Performance).
