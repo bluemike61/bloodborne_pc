@@ -1828,9 +1828,32 @@ void TemporalUpscaler::RunScaled() {
                                *ui_storage_view, w, h, color.info.pixel_format);
         }
 #endif
+        // Opt-in output-path test. If CMAA2's ui_image is what the display shows,
+        // BB_CMAA2_TINT=1 makes the world bright green (the HUD draws afterwards).
+        const bool debug_tint = ok && std::getenv("BB_CMAA2_TINT") != nullptr;
+        if (debug_tint) {
+            barrier(vk::Image(ui_image), vk::ImageAspectFlagBits::eColor,
+                    vk::ImageLayout::eGeneral, all,
+                    vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite,
+                    vk::ImageLayout::eGeneral, vk::PipelineStageFlagBits2::eTransfer,
+                    vk::AccessFlagBits2::eTransferWrite);
+            vk::ClearColorValue debug_clear{};
+            debug_clear.float32[1] = 1.0f;
+            debug_clear.float32[3] = 1.0f;
+            cmdbuf.clearColorImage(
+                vk::Image(ui_image), vk::ImageLayout::eGeneral, debug_clear,
+                vk::ImageSubresourceRange{vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
+            static bool reported = false;
+            if (!reported) {
+                std::printf("CMAA2 TINT: cleared UI output to bright green for presentation test\n");
+                reported = true;
+            }
+        }
         barrier(vk::Image(ui_image), vk::ImageAspectFlagBits::eColor,
-                vk::ImageLayout::eGeneral, all, rw, vk::ImageLayout::eGeneral,
-                vk::PipelineStageFlagBits2::eColorAttachmentOutput, color_access);
+                vk::ImageLayout::eGeneral, all,
+                debug_tint ? vk::AccessFlags2(vk::AccessFlagBits2::eTransferWrite) : rw,
+                vk::ImageLayout::eGeneral, vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+                color_access);
         done_this_frame = true;
         if (ok) {
             reset = false;
