@@ -253,6 +253,11 @@ bool Cmaa2Pass::Record(vk::CommandBuffer cmd, vk::Image input, vk::ImageView inp
                          vk::AccessFlagBits2::eShaderWrite | vk::AccessFlagBits2::eTransferRead,
     };
     cmd.pipelineBarrier2({.memoryBarrierCount = 1, .pMemoryBarriers = &done});
+    if (!reported_dispatch) {
+        reported_dispatch = true;
+        std::printf("CMAA2: %s compute passes recorded at %ux%u (GPU results not yet validated)\n",
+                    mode == 0 ? "HDR" : "LDR", width, height);
+    }
     return true;
 }
 } // namespace Vulkan
