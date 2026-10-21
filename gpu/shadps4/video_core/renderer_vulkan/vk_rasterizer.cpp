@@ -1039,24 +1039,40 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
             const char* value = std::getenv("BB_OBJECT_MOTION_ALL");
             return value && value[0] == '1';
         }();
-        bool gated = !all_motion;
+        // Diagnostic: keep motion history for ALL recognized small-skeleton draws,
+        // including unchanged weapons/props. More GPU work, but catches rigid-body
+        // movement whose model transform changes without changing the bone palette.
+        // Unlike BB_OBJECT_MOTION_ALL, the pipeline still selects skeleton shaders only.
+        static const bool small_motion = [] {
+            const char* value = std::getenv("BB_OBJECT_MOTION_SMALL");
+            return value && value[0] == '1';
+        }();
+        bool gated = !all_motion && !small_motion;
         u64 palette = 0;
-        for (const auto& resource : vs.buffers) {
-            if (resource.IsSpecial()) continue;
-            const auto buffer = resource.GetSharp(vs);
-            const u32 size = buffer.GetSize();
-            if (!buffer.Valid() || buffer.GetStride() != 16) continue;
-            const auto role = Motion::ClassifyBuffer(size);
-            if (role == Motion::BufferRole::Skeleton) {
-                gated = false;
-                break;
-            }
-            const VAddr address = buffer.base_address;
-            if (role == Motion::BufferRole::SmallSkeleton &&
-                memory->IsValidGpuMapping(address, 0) &&
-                memory->ClampRangeSize(address, size) == size) {
-                palette = XXH3_64bits_withSeed(reinterpret_cast<const void*>(address), size,
-                                               palette);
+        if (gated) {
+            for (const auto& resource : vs.buffers) {
+                if (resource.IsSpecial()) continue;
+                const auto buffer = resource.GetSharp(vs);
+                if (!buffer.Valid() || buffer.GetStride() != 16) continue;
+                const u32 size = buffer.GetSize();
+                const auto role = Motion::ClassifyBuffer(size);
+                if (role == Motion::BufferRole::Skeleton) {
+                    gated = false;
+                    break;
+                }
+                if (role == Motion::BufferRole::SmallSkeleton) {
+                    const VAddr address = buffer.base_address;
+                    // An unreadable bone palette does NOT mean a stationary prop:
+                    // hashing no bytes leaves palette == 0 forever and silently
+                    // sends animated pixels through camera-only motion.
+                    if (!memory->IsValidGpuMapping(address, 0) ||
+                        memory->ClampRangeSize(address, size) != size) {
+                        gated = false;
+                        break;
+                    }
+                    palette = XXH3_64bits_withSeed(reinterpret_cast<const void*>(address),
+                                                   size, palette);
+                }
             }
         }
         push_data.motion_param = 0;
