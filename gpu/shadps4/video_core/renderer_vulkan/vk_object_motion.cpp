@@ -89,6 +89,15 @@ ObjectMotion::ObjectMotion(const Instance& instance_, Scheduler& scheduler_)
     Shader::MotionVectors::positions_address = positions_address;
     enabled = true;
     std::printf("Object motion: on (%u vertices per frame)\n", PositionsPerFrame);
+    if (const char* small = std::getenv("BB_OBJECT_MOTION_SMALL"); small && small[0] == '1') {
+        std::puts("Object motion: tracking all recognized small-skeleton draws "
+                  "(BB_OBJECT_MOTION_SMALL=1; higher GPU cost)");
+    }
+    if (const char* strict = std::getenv("BB_MOTION_INDEX_STRICT");
+        strict && strict[0] == '1') {
+        std::puts("Object motion: strict per-frame index topology validation "
+                  "(BB_MOTION_INDEX_STRICT=1; higher CPU cost)");
+    }
 }
 
 ObjectMotion::~ObjectMotion() {
