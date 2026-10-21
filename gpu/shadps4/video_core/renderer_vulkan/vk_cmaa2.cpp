@@ -163,11 +163,17 @@ bool Cmaa2Pass::Record(vk::CommandBuffer cmd, vk::Image input, vk::ImageView inp
         };
         cmd.pipelineBarrier2({.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &init});
     }
+    // The scratch images have integer formats. With VULKAN_HPP_NO_CONSTRUCTORS,
+    // ClearColorValue is a union whose first member is float32, so initializing
+    // it with a uint32 std::array incorrectly tries to initialize float32.
+    vk::ClearColorValue heads_clear{};
+    heads_clear.uint32[0] = 0xffffffffu;
     cmd.clearColorImage(vk::Image(images[1]), vk::ImageLayout::eGeneral,
-                        vk::ClearColorValue{std::array{0xffffffffu, 0u, 0u, 0u}}, ColorRange);
+                        heads_clear, ColorRange);
     // The shader initializes every edge texel. Clear too, to be safe at odd sizes.
+    vk::ClearColorValue edges_clear{};
     cmd.clearColorImage(vk::Image(images[0]), vk::ImageLayout::eGeneral,
-                        vk::ClearColorValue{std::array{0u, 0u, 0u, 0u}}, ColorRange);
+                        edges_clear, ColorRange);
 
     const std::array<vk::DescriptorImageInfo, 4> img{{
         {.imageView = output_view, .imageLayout = vk::ImageLayout::eGeneral},
