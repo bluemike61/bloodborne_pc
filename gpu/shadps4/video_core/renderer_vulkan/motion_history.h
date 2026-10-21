@@ -73,10 +73,13 @@ public:
     } stats;
 
     template <class Scan>
-    Result Get(const Key& key, uint64_t frame, Scan&& scan) {
+    Result Get(const Key& key, uint64_t frame, Scan&& scan,
+               uint64_t revalidate_frames = Revalidate) {
         auto& entry = entries[key];
         entry.last_use = frame;
-        if (entry.valid && frame - entry.verified < Revalidate) {
+        // Strict revalidation (1) catches changing topology in reused index buffers.
+        // Keep the normal 32-frame cache as the default: full scans are expensive.
+        if (entry.valid && frame - entry.verified < std::max<uint64_t>(1, revalidate_frames)) {
             ++stats.hits;
             return entry.result;
         }
