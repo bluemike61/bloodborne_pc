@@ -536,7 +536,8 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
     make_image(reactive_image, reactive_view, vk::Format::eR8Unorm,
                vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled);
     const char* bias_setting = std::getenv("BB_DLAA_BIAS");
-    if (use_dlss && Dlss::Get()->SupportsBias() &&
+    if (use_dlss && Dlss::QualityForScale(float(ow) / float(w)) == 0 &&
+        Dlss::Get()->SupportsBias() &&
         !(bias_setting && bias_setting[0] == '0') && DlssBiasStrength() > 0.0f) {
         make_image(dlss_bias_image, dlss_bias_view, vk::Format::eR8Unorm,
                    vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled);
