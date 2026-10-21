@@ -15,7 +15,8 @@ extern "C" {
 #endif
 
 // 2: DLSS Frame Generation (the FrameGen* members; an ABI 1 bridge has DLSS only).
-#define BBPORT_DLSS_BRIDGE_ABI 2
+// 3: optional DLAA bias-current-color image appended to BbDlssEvaluate.
+#define BBPORT_DLSS_BRIDGE_ABI 3
 
 typedef void (*BbDlssLogFn)(int warning, const char* message);
 
@@ -49,6 +50,9 @@ typedef struct BbDlssEvaluate {
     int32_t reset;
     float frame_ms;
     float sharpness; // 0..1; 0 leaves the output unsharpened
+    // ABI 3: sampled R8_UNORM render-resolution mask; null image means unused.
+    // Must remain last: ABI 1/2 DLLs read only the original struct prefix.
+    BbDlssImage bias;
 } BbDlssEvaluate;
 
 // DLSS Frame Generation (nvngx_dlssg.dll): frames between two finished frames.
