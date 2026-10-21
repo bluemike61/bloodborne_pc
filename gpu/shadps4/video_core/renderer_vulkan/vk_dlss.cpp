@@ -240,9 +240,13 @@ bool Dlss::Evaluate(vk::CommandBuffer command, const Frame& frame) {
                            r.width,
                            r.height};
     };
+    // ABI 3 appends the bias image; ABI 1/2 bridges safely read the original
+    // prefix and will ignore the new optional field.
     const BbDlssEvaluate parameters{image(frame.color),  image(frame.depth), image(frame.motion),
                                     image(frame.output), frame.jitter_x,     frame.jitter_y,
-                                    frame.reset ? 1 : 0, frame.frame_ms,     frame.sharpness};
+                                    frame.reset ? 1 : 0, frame.frame_ms,     frame.sharpness,
+                                    impl->api->abi >= 3 && frame.bias.image ? image(frame.bias)
+                                                                           : BbDlssImage{}};
     return impl->api->Evaluate(command, &parameters) != 0;
 }
 
