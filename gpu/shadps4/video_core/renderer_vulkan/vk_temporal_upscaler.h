@@ -265,7 +265,8 @@ private:
     std::unordered_map<VAddr, DisplayImage> displays;
     FfxVkPortableUpscaleContext* context = nullptr;
     bool resources_ready = false; ///< images below match width/height/out size
-    bool resources_fsr4 = false;  ///< made for FSR 4 (no FSR 3 context)
+    bool resources_fsr4 = false;  ///< external provider context (FSR 4 or DLSS), no FSR 3
+    bool resources_dlss = false;  ///< distinguish DLSS from FSR 4 for bias allocation
     bool resources_taa = false;
     std::unique_ptr<Fsr4Upscaler> fsr4;
     bool fsr4_failed = false;
