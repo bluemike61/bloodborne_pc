@@ -61,6 +61,10 @@ public:
     /// Vertical field of view and near/far planes of the current camera.
     [[nodiscard]] float VerticalFov() const noexcept;
     [[nodiscard]] float Near() const noexcept;
+    /// The perspective depth scale used by camera_motion.comp to validate object vectors.
+    [[nodiscard]] float ProjectionDepthScale() const noexcept {
+        return current.proj[2];
+    }
     /// The far plane of the current camera, or `fallback` for an infinite or unknown one.
     [[nodiscard]] float FarPlane(float fallback) const noexcept;
     /// Frame generation (DLSS): row-vector matrices of D3D clip space (y up, depth 0 near):
