@@ -228,7 +228,8 @@ std::array<std::array<float, 4>, 3> CameraMotion::TaaDepthParameters() const noe
 }
 
 vk::ImageView CameraMotion::ObjectMotionView() const noexcept {
-    return object_motion && object_motion->Enabled() ? object_motion->View() : vk::ImageView{};
+    return object_motion_ready && object_motion && object_motion->Enabled()
+        ? object_motion->View() : vk::ImageView{};
 }
 
 vk::Image CameraMotion::ObjectMotionImage(u32 width, u32 height) const noexcept {
@@ -241,6 +242,7 @@ void CameraMotion::RecordMotion(vk::CommandBuffer cmdbuf, vk::ImageView depth_vi
     bool object_valid = false;
     const vk::ImageView object_view = object_motion && object_motion->Enabled()
         ? object_motion->PrepareRead(cmdbuf, width, height, object_valid) : depth_view;
+    object_motion_ready = object_valid;
     const PushConstants push{
         .reproject = Multiply(previous.view, current.inv_view),
         .proj = current.proj,
@@ -309,6 +311,7 @@ void CameraMotion::OnDisplayPass(VideoCore::ImageId frame) {
         Overlay(frame);
     }
     if (!frame_has_camera) InvalidateHistory();
+    object_motion_ready = false;
     frame_has_camera = false;
     depth_id = {};
 }
