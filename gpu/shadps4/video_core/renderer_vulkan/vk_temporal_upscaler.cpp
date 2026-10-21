@@ -36,6 +36,25 @@ namespace Vulkan {
 
 namespace {
 
+// Scale NVIDIA's optional DLAA history-bias input without recompiling the
+// shader. The default exactly preserves the previous 3x3 mask's strength.
+float DlssBiasStrength() {
+    static const float strength = [] {
+        const char* value = std::getenv("BB_DLAA_BIAS_STRENGTH");
+        if (!value || !*value) {
+            return 1.0f;
+        }
+        char* end = nullptr;
+        const float parsed = std::strtof(value, &end);
+        if (end == value || *end != '\0' || !std::isfinite(parsed)) {
+            std::printf("DLAA: invalid BB_DLAA_BIAS_STRENGTH; using 1.0\n");
+            return 1.0f;
+        }
+        return std::clamp(parsed, 0.0f, 2.0f);
+    }();
+    return strength;
+}
+
 FfxVkPortableImage Describe(vk::Image image, vk::Format format, u32 width, u32 height,
                             vk::ImageUsageFlags usage, vk::ImageAspectFlags aspect,
                             FfxVkPortableResourceState state) {
@@ -638,8 +657,14 @@ void TemporalUpscaler::CreatePipelines() {
             .flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR,
             .bindingCount = u32(bindings.size()), .pBindings = bindings.data(),
         }));
+        const vk::PushConstantRange push{
+            .stageFlags = vk::ShaderStageFlagBits::eCompute,
+            .offset = 0,
+            .size = 2 * sizeof(float),
+        };
         dlss_bias_pipeline_layout = Check(device.createPipelineLayoutUnique({
             .setLayoutCount = 1, .pSetLayouts = &*dlss_bias_desc_layout,
+            .pushConstantRangeCount = 1, .pPushConstantRanges = &push,
         }));
         dlss_bias_pipeline = compute(DLSS_BIAS_COMP, *dlss_bias_pipeline_layout);
     }
@@ -1036,7 +1061,8 @@ bool TemporalUpscaler::RecordReactive(vk::ImageView color_view) {
 void TemporalUpscaler::Run() {
     if (auto* profiler = GpuProfiler::Get()) {
         const char* label = BbSettings::Get().upscaler == BbSettings::UpscalerTaa
-            ? "upscaler Run (TAA)" : "upscaler Run (FSR)";
+            ? "upscaler Run (TAA)" : UseDlss() ? "upscaler Run (DLSS)"
+                                               : "upscaler Run (FSR)";
         profiler->Mark(0xF5A0'0000ull ^ std::hash<std::string_view>{}(label),
                        [label] { return std::string{label}; });
     }
@@ -1727,7 +1753,8 @@ void TemporalUpscaler::RunUiOnly(VideoCore::ImageId color_id, VideoCore::ImageId
 void TemporalUpscaler::RunScaled() {
     if (auto* profiler = GpuProfiler::Get()) {
         const char* label = BbSettings::Get().upscaler == BbSettings::UpscalerTaa
-            ? "upscaler RunScaled (TAA)" : "upscaler RunScaled (FSR)";
+            ? "upscaler RunScaled (TAA)" : UseDlss() ? "upscaler RunScaled (DLSS)"
+                                                     : "upscaler RunScaled (FSR)";
         profiler->Mark(0xF5A0'0000ull ^ std::hash<std::string_view>{}(label),
                        [label] { return std::string{label}; });
     }
@@ -2220,6 +2247,9 @@ bool TemporalUpscaler::RecordDlssBias(vk::CommandBuffer cmdbuf, vk::ImageView de
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, *dlss_bias_pipeline);
     cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, *dlss_bias_pipeline_layout,
                                 0, writes);
+    const std::array<float, 2> params{camera_motion.ProjectionDepthScale(), DlssBiasStrength()};
+    cmdbuf.pushConstants(*dlss_bias_pipeline_layout, vk::ShaderStageFlagBits::eCompute,
+                         0, sizeof(params), params.data());
     cmdbuf.dispatch((w + 7) / 8, (h + 7) / 8, 1);
     const vk::ImageMemoryBarrier2 done{
         .srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
@@ -2269,7 +2299,8 @@ bool TemporalUpscaler::RecordDlss(vk::CommandBuffer cmdbuf, const Dlss::Resource
                     vk::ImageAspectFlagBits::eColor, w, h};
             static bool reported = false;
             if (!reported) {
-                std::printf("DLAA: animated-object history bias enabled (BB_DLAA_BIAS=0 disables)\n");
+                std::printf("DLAA: animated-object history bias enabled (strength %.2f, "
+                            "BB_DLAA_BIAS=0 disables)\n", DlssBiasStrength());
                 reported = true;
             }
         }
