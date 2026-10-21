@@ -33,18 +33,23 @@ void main() {
         for (int x = -1; x <= 1; ++x) {
             const ivec2 neighbour = clamp(pixel + ivec2(x, y), ivec2(0), size - 1);
             const vec4 object = texelFetch(objects, neighbour, 0);
-            // Reject motion from a pixel later covered by another (untracked)
-            // draw, using the same depth test as camera_motion.comp.
-            const float depth = texelFetch(scene_depth, neighbour, 0).r;
-            const float depth_threshold =
-                max(2e-7, (params.projection_depth_scale - depth) * 0.01);
-            if (object.b < 0.99 || abs(object.a - depth) >= depth_threshold ||
-                any(isnan(object)) || any(isinf(object))) {
+            if (object.b < 0.99 || any(isnan(object)) || any(isinf(object))) {
                 continue;
             }
             const float speed = length(object.rg);
             // Preserve subpixel temporal detail. Stronger bias for actual movement.
             const float strength = clamp((speed - 0.75) / 18.0, 0.0, 0.75);
+            if (strength == 0.0) {
+                continue;
+            }
+            // Most scene pixels have no moving object. Skip the extra depth
+            // fetch for them; still reject vectors hidden by untracked draws.
+            const float depth = texelFetch(scene_depth, neighbour, 0).r;
+            const float depth_threshold =
+                max(2e-7, (params.projection_depth_scale - depth) * 0.01);
+            if (abs(object.a - depth) >= depth_threshold) {
+                continue;
+            }
             const float proximity = (x == 0 && y == 0) ? 1.0 : 0.7;
             value = max(value, strength * proximity);
         }
