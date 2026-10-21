@@ -2292,8 +2292,10 @@ bool TemporalUpscaler::RecordDlss(vk::CommandBuffer cmdbuf, const Dlss::Resource
             }
         }
         const char* bias_setting = std::getenv("BB_DLAA_BIAS");
+        // Zero strength means no bias at all; skip the compute pass and avoid
+        // handing NGX a redundant all-zero texture.
         if (desc.quality == 0 && dlss->SupportsBias() &&
-            !(bias_setting && bias_setting[0] == '0') &&
+            !(bias_setting && bias_setting[0] == '0') && DlssBiasStrength() > 0.0f &&
             RecordDlssBias(cmdbuf, depth.view, w, h)) {
             bias = {vk::Image(dlss_bias_image), *dlss_bias_view, vk::Format::eR8Unorm,
                     vk::ImageAspectFlagBits::eColor, w, h};
