@@ -78,7 +78,8 @@ def main():
                    f'-DCMAA2_UAV_STORE_TYPED_UNORM_FLOAT={0 if fmt == "HDR" else 1}',
                    f'-DCMAA2_SUPPORT_HDR_COLOR_RANGE={1 if fmt == "HDR" else 0}',
                    '-DCMAA2_EDGE_DETECTION_LUMA_PATH=1',
-                   '-DCMAA2_STATIC_QUALITY_PRESET=2',
+                   # CMAA2 Ultra quality (preset 3): threshold 0.05 vs High's 0.07.
+                   '-DCMAA2_STATIC_QUALITY_PRESET=3',
                    '-DCMAA_MSAA_SAMPLE_COUNT=1',
                    '-Fo', str(spirv), str(source_file)]
             subprocess.run(cmd, check=True)
