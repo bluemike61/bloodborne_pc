@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
+#include <cstdlib>
 #include <stdexcept>
 #include <utility>
 
@@ -24,6 +25,7 @@ constexpr u32 CeilDiv(u32 a, u32 b) { return (a + b - 1) / b; }
 Cmaa2Pass::Cmaa2Pass(const Instance& instance_, Scheduler& scheduler_)
     : instance(instance_), scheduler(scheduler_), device(instance.GetDevice()),
       allocator(instance.GetAllocator()) {
+    diagnostics_enabled = std::getenv("BB_CMAA2_DIAGNOSTICS") != nullptr;
     std::array<vk::DescriptorSetLayoutBinding, 9> bindings{};
     for (u32 i = 0; i < bindings.size(); ++i) {
         bindings[i] = {.binding = i,
@@ -88,6 +90,13 @@ void Cmaa2Pass::DestroyBuffers() {
         if (b.buffer) vmaDestroyBuffer(allocator, static_cast<VkBuffer>(b.buffer), b.allocation);
         b = {};
     }
+    if (diagnostics.buffer) {
+        vmaDestroyBuffer(allocator, static_cast<VkBuffer>(diagnostics.buffer),
+                         diagnostics.allocation);
+    }
+    diagnostics = {};
+    diagnostics_mapped = nullptr;
+    diagnostics_pending = false;
 }
 
 void Cmaa2Pass::Resize(u32 width, u32 height) {
@@ -138,9 +147,44 @@ void Cmaa2Pass::Resize(u32 width, u32 height) {
             throw std::runtime_error("CMAA2: failed to allocate scratch buffer");
         buffers[i] = {vk::Buffer{b}, a, sizes_b[i]};
     }
+    if (diagnostics_enabled) {
+        // Two 64-byte copies of CMAA2's control buffer; host-visible and mapped.
+        const vk::BufferCreateInfo info{
+            .size = 128, .usage = vk::BufferUsageFlagBits::eTransferDst,
+            .sharingMode = vk::SharingMode::eExclusive,
+        };
+        const VkBufferCreateInfo ci = static_cast<VkBufferCreateInfo>(info);
+        const VmaAllocationCreateInfo alloc_info{
+            .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
+                     VMA_ALLOCATION_CREATE_MAPPED_BIT,
+            .usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST,
+        };
+        VkBuffer buffer{};
+        VmaAllocation allocation{};
+        VmaAllocationInfo allocation_info{};
+        if (vmaCreateBuffer(allocator, &ci, &alloc_info, &buffer, &allocation,
+                            &allocation_info) == VK_SUCCESS && allocation_info.pMappedData) {
+            diagnostics = {vk::Buffer{buffer}, allocation, 128};
+            diagnostics_mapped = allocation_info.pMappedData;
+        } else {
+            if (buffer) vmaDestroyBuffer(allocator, buffer, allocation);
+            diagnostics_enabled = false;
+            std::printf("CMAA2 diagnostics: staging readback unavailable\n");
+        }
+        diagnostics_frames = 0;
+    }
 }
 
 void Cmaa2Pass::Prepare(u32 width, u32 height) {
+    if (diagnostics_pending && diagnostics_mapped) {
+        // At most one synchronous readback every 180 CMAA2 frames in diagnostic mode.
+        scheduler.Finish();
+        vmaInvalidateAllocation(allocator, diagnostics.allocation, 0, VK_WHOLE_SIZE);
+        const auto* data = static_cast<const u32*>(diagnostics_mapped);
+        std::printf("CMAA2 counters: shapes=%u, deferredLocations=%u, blendItems=%u\n",
+                    data[3], data[16 + 3], data[12]);
+        diagnostics_pending = false;
+    }
     if (width != current_width || height != current_height) Resize(width, height);
 }
 
@@ -151,6 +195,9 @@ bool Cmaa2Pass::Record(vk::CommandBuffer cmd, vk::Image input, vk::ImageView inp
         (format != vk::Format::eR16G16B16A16Sfloat && format != vk::Format::eR8G8B8A8Unorm))
         return false;
     if (width != current_width || height != current_height) return false;
+    ++diagnostics_frames;
+    const bool inspect = diagnostics_enabled && diagnostics.buffer && !diagnostics_pending &&
+                         diagnostics_frames % 180 == 0;
     // CMAA2 only overwrites detected edges. Copy the rest, preserving original alpha.
     const vk::ImageCopy copy{
         .srcSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
@@ -240,6 +287,25 @@ bool Cmaa2Pass::Record(vk::CommandBuffer cmd, vk::Image input, vk::ImageView inp
     sync();
     bind(1); cmd.dispatch(2, 1, 1);
     sync();
+    if (inspect) {
+        const vk::MemoryBarrier2 to_transfer{
+            .srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+            .srcAccessMask = vk::AccessFlagBits2::eShaderWrite,
+            .dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+            .dstAccessMask = vk::AccessFlagBits2::eTransferRead,
+        };
+        cmd.pipelineBarrier2({.memoryBarrierCount = 1, .pMemoryBarriers = &to_transfer});
+        cmd.copyBuffer(buffers[3].buffer, diagnostics.buffer,
+                       vk::BufferCopy{.srcOffset = 0, .dstOffset = 0, .size = 64});
+        const vk::MemoryBarrier2 resume{
+            .srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+            .srcAccessMask = vk::AccessFlagBits2::eTransferRead,
+            .dstStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+            .dstAccessMask = vk::AccessFlagBits2::eShaderRead |
+                             vk::AccessFlagBits2::eShaderWrite,
+        };
+        cmd.pipelineBarrier2({.memoryBarrierCount = 1, .pMemoryBarriers = &resume});
+    }
     bind(2); cmd.dispatchIndirect(buffers[4].buffer, 0);
     sync();
     bind(1); cmd.dispatch(1, 2, 1);
@@ -253,6 +319,18 @@ bool Cmaa2Pass::Record(vk::CommandBuffer cmd, vk::Image input, vk::ImageView inp
                          vk::AccessFlagBits2::eShaderWrite | vk::AccessFlagBits2::eTransferRead,
     };
     cmd.pipelineBarrier2({.memoryBarrierCount = 1, .pMemoryBarriers = &done});
+    if (inspect) {
+        cmd.copyBuffer(buffers[3].buffer, diagnostics.buffer,
+                       vk::BufferCopy{.srcOffset = 0, .dstOffset = 64, .size = 64});
+        const vk::MemoryBarrier2 host_read{
+            .srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+            .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+            .dstStageMask = vk::PipelineStageFlagBits2::eHost,
+            .dstAccessMask = vk::AccessFlagBits2::eHostRead,
+        };
+        cmd.pipelineBarrier2({.memoryBarrierCount = 1, .pMemoryBarriers = &host_read});
+        diagnostics_pending = true;
+    }
     if (!reported_dispatch) {
         reported_dispatch = true;
         std::printf("CMAA2: %s compute passes recorded at %ux%u (GPU results not yet validated)\n",
