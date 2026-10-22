@@ -51,6 +51,58 @@ class QuietUpdateCheckTests(unittest.TestCase):
                                                     now=core.time.time() + core.QUIET_CHECK_INTERVAL + 1))
         self.assertEqual(urlopen.call_count, 2)
 
+    def test_update_banner_does_not_require_removed_sidebar_widget(self):
+        # The sidebar is a Canvas; there is no side_note widget to pack before.
+        # A remembered release must not crash Launcher.__init__ on startup.
+        class Widget:
+            def __init__(self, master=None):
+                self.master = master
+                self.packed = []
+                self.configured = []
+            def pack(self, **kwargs):
+                self.packed.append(kwargs)
+            def configure(self, **kwargs):
+                self.configured.append(kwargs)
+
+        footer = object()
+        status = Widget(footer)
+        frames = []
+        buttons = []
+
+        class FakeTk:
+            @staticmethod
+            def Frame(master, **_kwargs):
+                frame = Widget(master)
+                frames.append(frame)
+                return frame
+
+        class FakeTtk:
+            @staticmethod
+            def Button(master, **kwargs):
+                button = Widget(master)
+                button.command = kwargs['command']
+                buttons.append(button)
+                return button
+
+        launcher = core.Launcher.__new__(core.Launcher)
+        launcher.tk = FakeTk()
+        launcher.ttk = FakeTtk()
+        launcher.status = status
+        launcher.process = None
+        launcher.update_box = None
+        launcher.px = lambda size: size
+        # Intentionally no launcher.side_note: the current UI has no such widget.
+        launcher.offer_update('v2', 'https://example.invalid/zip', 'https://example.invalid/news')
+        self.assertIs(launcher.update_box.master, footer)
+        self.assertIs(launcher.update_label, status)
+        self.assertEqual(len(buttons), 2)
+        self.assertEqual(launcher.update_box.packed[0]['side'], 'right')
+        self.assertIn('v2', status.configured[-1]['text'])
+        # Repeated cached/network checks must not produce duplicate notices.
+        launcher.offer_update('v3', None, 'https://example.invalid/news')
+        self.assertEqual(len(frames), 1)
+        self.assertEqual(len(buttons), 2)
+
     def test_network_failure_is_silent_and_corrupt_cache_ignored(self):
         self.cache.write_text('not json', encoding='utf-8')
         self.assertIsNone(core.remembered_update())
