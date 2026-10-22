@@ -29,7 +29,9 @@ struct PushConstants {
     std::array<float, 2> jitter;
     std::array<float, 2> previous_jitter;
     u32 mode;
+    float object_depth_tolerance;
 };
+static_assert(sizeof(PushConstants) == 112); // matches camera_motion.comp push-constant offsets
 
 /// a * b for 3x4 affine matrices (rows [R | t]).
 std::array<float, 12> Multiply(const std::array<float, 12>& a, const std::array<float, 12>& b) {
@@ -239,6 +241,23 @@ vk::Image CameraMotion::ObjectMotionImage(u32 width, u32 height) const noexcept 
 
 void CameraMotion::RecordMotion(vk::CommandBuffer cmdbuf, vk::ImageView depth_view,
                                 vk::ImageView motion_view, u32 width, u32 height) {
+    // A/B testing of occlusion rejection: stricter thresholds can reduce trails at
+    // silhouettes, but may discard good vectors on tiny depth disagreements.
+    static const float object_depth_tolerance = [] {
+        const char* raw = std::getenv("BB_MOTION_DEPTH_TOLERANCE");
+        if (!raw || !*raw) {
+            return 0.01f;
+        }
+        char* end = nullptr;
+        const float value = std::strtof(raw, &end);
+        if (end == raw || *end != '\0' || !std::isfinite(value) ||
+            value < 0.0f || value > 0.05f) {
+            std::printf("Object motion: invalid BB_MOTION_DEPTH_TOLERANCE='%s'; using 0.01\n", raw);
+            return 0.01f;
+        }
+        std::printf("Object motion: depth match tolerance %.4f (default 0.01)\n", value);
+        return value;
+    }();
     bool object_valid = false;
     const vk::ImageView object_view = object_motion && object_motion->Enabled()
         ? object_motion->PrepareRead(cmdbuf, width, height, object_valid) : depth_view;
@@ -251,6 +270,7 @@ void CameraMotion::RecordMotion(vk::CommandBuffer cmdbuf, vk::ImageView depth_vi
         .jitter = jitter,
         .previous_jitter = previous_jitter,
         .mode = object_valid ? 1u : 0u,
+        .object_depth_tolerance = object_depth_tolerance,
     };
     const vk::DescriptorImageInfo depth_info{.imageView = depth_view,
                                              .imageLayout = vk::ImageLayout::eGeneral};
@@ -368,6 +388,7 @@ void CameraMotion::Overlay(VideoCore::ImageId frame) {
                 : BbToggle::Disabled(1u << 22) ? 3u
                 : BbToggle::Disabled(1u << 23) ? 4u
                                                : 0u,
+        .object_depth_tolerance = 0.01f,
     };
     static u32 log_counter = 0;
     if (++log_counter % 200 == 0) {
