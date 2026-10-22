@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 #include "video_core/renderer_vulkan/vk_instance.h"
+#include "video_core/renderer_vulkan/camera_motion_math.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/texture_cache/image.h"
 #include "video_core/host_shaders/camera_motion_comp.h"
@@ -45,7 +46,9 @@ int main() {
         std::array<float,4> proj,prev_proj;
         std::array<float,2> size,jitter,previous_jitter;
         u32 mode;
+        float object_depth_tolerance, inv_depth_offset;
     };
+    static_assert(sizeof(Params)==116);
     const vk::PushConstantRange push{vk::ShaderStageFlagBits::eCompute,0,sizeof(Params)};
     auto layout=device.createPipelineLayoutUnique({.setLayoutCount=1,.pSetLayouts=&*descriptors,
         .pushConstantRangeCount=1,.pPushConstantRanges=&push},nullptr,d).value;
@@ -101,7 +104,8 @@ int main() {
         }
         Params params{{1,0,rotation,translation,0,1,0,0,0,0,1,0},
             {1,1,1,-0.05f},{1,1,1,-0.05f},{W,H},
-            {jitter ? 0.37f : 0.f,jitter ? -0.29f : 0.f},{0,0},mode};
+            {jitter ? 0.37f : 0.f,jitter ? -0.29f : 0.f},{0,0},mode,0.01f,-20.0f};
+        params.reproject=Vulkan::Motion::NormalizeReprojection(params.reproject,params.proj);
         cmd.bindPipeline(vk::PipelineBindPoint::eCompute,*pipeline,d);
         cmd.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute,*layout,0,writes,d);
         cmd.pushConstants(*layout,vk::ShaderStageFlagBits::eCompute,0,sizeof(params),&params,d);
