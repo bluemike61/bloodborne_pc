@@ -27,6 +27,31 @@ Previously `run.py` overwrote it according to whether the title assets
 existed. The new `BB_PC_MENU_HOOKS=0` opt-out in `pc_menu.c` is
 diagnostic-only and does not disable other engine features.
 
+## Generated optionsetting.gfx file collision (fixed on DLAA branch)
+
+A launcher log ending with:
+
+```text
+Enhancements: In-game PC menu (System > PC Settings) (up to date)
+Mods: pc-menu: 25 files
+Mods: File/directory conflict: dvdroot_ps4/menu/optionsetting.gfx
+```
+
+means asset generation succeeded but `scripts/mods.py` refused to replace an
+existing regular file in its **temporary overlay**. The previous overlay code
+only recognized files it had explicitly recorded as links; a materialized file
+or an untracked hard link fell into the file/directory-conflict error.
+
+The overlay now replaces existing regular files in that temporary directory,
+while retaining errors for actual directory-versus-file conflicts. When the
+regular file is a hard link to the original game, its read-only attribute is
+restored after removing the overlay link. The original game files are not
+changed. Regression cases live in `tests/test_mods.py`.
+
+After `git pull`, run `python -m unittest discover -s tests -p 'test_mods.py'`
+and launch again with `BB_PC_MENU=1 BB_PC_MENU_QUIT=0`. No special mod deletion
+or manual replacement of `optionsetting.gfx` is needed.
+
 ## Testing
 
 Build the current branch with `bash build.sh`, then launch as usual with
