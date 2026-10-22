@@ -137,10 +137,10 @@ int main() {
     };
     const std::array<float, 4> projection{1.4f, 1.8f, 1.0f, -0.05f};
     const auto coefficients = NormalizeReprojection(transform, projection);
-    const auto dot4 = [](const std::array<float, 12>& m, u32 row,
+    const auto dot4 = [](const std::array<float, 12>& m, uint32_t row,
                          const std::array<float, 4>& v) {
         float value = 0;
-        for (u32 c = 0; c < 4; ++c) value += m[row * 4 + c] * v[c];
+        for (uint32_t c = 0; c < 4; ++c) value += m[row * 4 + c] * v[c];
         return value;
     };
     for (float depth : {0.2f, 0.9f, 0.999995f, 1.0f}) {
@@ -155,7 +155,7 @@ int main() {
         const float old_z = dot4(transform, 2, old_view);
         const float new_z = dot4(coefficients, 2, new_view);
         assert(old_z > 0 && new_z > 0);
-        for (u32 axis = 0; axis < 2; ++axis) {
+        for (uint32_t axis = 0; axis < 2; ++axis) {
             const float expected = dot4(transform, axis, old_view) / old_z;
             const float actual = dot4(coefficients, axis, new_view) / new_z;
             assert(std::fabs(expected - actual) < 2e-4f);
