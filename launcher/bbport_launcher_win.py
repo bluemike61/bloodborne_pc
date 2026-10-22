@@ -2197,19 +2197,21 @@ class Launcher:
             return
         tk, ttk = self.tk, self.ttk
         text = _('Version {} is available.', 'Доступна версия {}.').format(version)
-        box = tk.Frame(self.side, bg=CARD, highlightthickness=1, highlightbackground=GOLD)
-        self.update_label = tk.Label(box, text=text, bg=CARD, fg=GOLD, font=('Segoe UI', 10, 'bold'),
-                                     wraplength=self.px(160), justify='left')
-        self.update_label.pack(anchor='w', padx=10, pady=(8, 6))
-        buttons = tk.Frame(box, bg=CARD)
-        buttons.pack(fill='x', padx=10, pady=(0, 10))
-        self.update_button = ttk.Button(buttons, text=_('Update', 'Обновить'),
+        # The sidebar is now a Canvas (draw_sidebar), not the old pack-managed
+        # frame. The obsolete self.side_note anchor crashes on a remembered
+        # update before the launcher can finish opening. Use the existing
+        # bottom status bar instead, keeping update actions on every page.
+        box = tk.Frame(self.status.master, bg=BG)
+        self.update_button = ttk.Button(box, text=_('Update', 'Обновить'),
                                         command=lambda: self.install_update(version, url, page))
-        self.update_button.pack(fill='x')
-        ttk.Button(buttons, text=_("What's new", 'Что нового'), command=lambda: webbrowser.open(page)).pack(
-            fill='x', pady=(4, 0))
-        box.pack(fill='x', padx=(22, 18), pady=(0, 14), before=self.side_note)
+        self.update_button.pack(side='left', padx=(0, self.px(6)))
+        ttk.Button(box, text=_("What's new", 'Что нового'),
+                   command=lambda: webbrowser.open(page)).pack(side='left')
+        box.pack(side='right', padx=(self.px(6), 0))
         self.update_box = box
+        # install_update reports progress through update_label. The shared
+        # status label is already present and remains visible in the footer.
+        self.update_label = self.status
         if not self.process:
             self.status.configure(text=text, fg=GOLD)
 
