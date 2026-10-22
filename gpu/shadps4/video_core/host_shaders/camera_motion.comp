@@ -18,7 +18,7 @@ layout(binding = 2) uniform texture2D object_tex;
 #endif
 
 layout(push_constant) uniform Constants {
-    vec4 reproject[3]; // previous view * inverse current view, rows (3x4)
+    vec4 reproject[3]; // previous view * inverse current view, XY columns / current proj.xy
     vec4 proj;         // current: x scale, y scale, z scale, z offset
     vec4 prev_proj;    // previous: x scale, y scale, z scale, z offset
     vec2 size;         // pixels
@@ -27,6 +27,7 @@ layout(push_constant) uniform Constants {
     uint mode;         // motion: 1 = object motion vectors available; debug: 0 motion, 1 raw
                        // depth, 2 view z / 50, 3 reprojected previous frame, 4 |difference|
     float object_depth_tolerance; // fraction of current projection depth distance (default 0.01)
+    float inv_depth_offset; // CPU-computed 1 / proj.w; avoids a division for each pixel
 };
 
 void main() {
@@ -59,17 +60,21 @@ void main() {
     const vec2 scene_uv = uv - jitter / size;
     const vec2 ndc = vec2(scene_uv.x * 2.0 - 1.0, 1.0 - scene_uv.y * 2.0);
 
-    // Clip z = zs * z + zo, w = z; depth = zs + zo / z (zo < 0, depth < zs in front).
+    // Depth = proj.z + proj.w / z. Previous-view perspective division cancels
+    // the current z: transform (ndc.xy, 1, 1/z) with rows normalized once on
+    // the CPU instead of reconstructing a 3D view position at every pixel.
+    // Sky uses w=0, retaining rotation without camera translation.
     const bool sky = depth >= 1.0;
-    const float denom = min(depth - proj.z, -1e-8);
-    const float z = sky ? 1.0 : proj.w / denom;
-    // Clear depth is an infinite direction: rotate it with the camera, without translation.
-    // A threshold below 1 incorrectly classified distant geometry as motionless sky.
-    const vec4 view = vec4(ndc.x * z / proj.x, ndc.y * z / proj.y, z, sky ? 0.0 : 1.0);
-    const vec3 prev_view =
-        vec3(dot(reproject[0], view), dot(reproject[1], view), dot(reproject[2], view));
+    const float inv_z = sky ? 0.0 : min(depth - proj.z, -1e-8) * inv_depth_offset;
+    const vec4 view_over_z = vec4(ndc, 1.0, inv_z);
+    const vec3 prev_over_z =
+        vec3(dot(reproject[0], view_over_z), dot(reproject[1], view_over_z),
+             dot(reproject[2], view_over_z));
+    // A positive previous-view z is required; express the original 1e-4
+    // distance cutoff in the normalized space (z=1 for sky).
+    const float near_limit = 1e-4 * (sky ? 1.0 : inv_z);
     const vec2 prev_ndc =
-        vec2(prev_view.x * prev_proj.x, prev_view.y * prev_proj.y) / max(prev_view.z, 1e-4);
+        (prev_over_z.xy * prev_proj.xy) / max(prev_over_z.z, near_limit);
     const vec2 prev_uv = vec2(prev_ndc.x * 0.5 + 0.5, 0.5 - prev_ndc.y * 0.5);
     const vec2 reprojected_motion = (prev_uv - scene_uv) * size;
     // When the current pixel was behind the previous camera, no valid history
@@ -78,7 +83,7 @@ void main() {
     // off-screen motion instead, asking the temporal upscaler to reject history.
     // Also reject NaNs/infinities and magnitudes that cannot be represented
     // robustly in a signed 16-bit floating-point motion channel.
-    const bool valid_reprojection = prev_view.z > 1e-4 &&
+    const bool valid_reprojection = prev_over_z.z > near_limit &&
         all(lessThan(abs(reprojected_motion), vec2(32768.0)));
     const vec2 motion = valid_reprojection ? reprojected_motion : -2.0 * size;
 
@@ -101,6 +106,7 @@ void main() {
         return;
     } else if (mode == 2) {
         // View-space depth visualization (z / 50)
+        const float z = sky ? 1.0 : 1.0 / inv_z;
         const float v = z / 50.0;
         imageStore(color_img, pixel, vec4(fract(v * 4.0), v, v < 0.0 ? 1.0 : 0.0, 1.0));
         return;
