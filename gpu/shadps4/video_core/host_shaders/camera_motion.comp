@@ -26,6 +26,7 @@ layout(push_constant) uniform Constants {
     vec2 previous_jitter;
     uint mode;         // motion: 1 = object motion vectors available; debug: 0 motion, 1 raw
                        // depth, 2 view z / 50, 3 reprojected previous frame, 4 |difference|
+    float object_depth_tolerance; // fraction of current projection depth distance (default 0.01)
 };
 
 void main() {
@@ -34,6 +35,24 @@ void main() {
         return;
     }
     const float depth = texelFetch(depth_tex, pixel, 0).r;
+#ifndef DEBUG_OVERLAY
+    if (mode == 1) {
+        const vec4 object_motion = texelFetch(object_tex, pixel, 0);
+        // Object motion has already reprojected this pixel using its skinned vertex
+        // positions. Prefer that motion, but only while its depth still matches
+        // the final scene: ordinary draws can cover an earlier instrumented draw.
+        // Reject magnitudes that RG16F cannot represent safely (including NaNs/Inf).
+        const float depth_threshold =
+            max(2e-7, (proj.z - depth) * object_depth_tolerance);
+        if (object_motion.b > 0.99 &&
+            abs(object_motion.a - depth) < depth_threshold &&
+            all(lessThan(abs(object_motion.rg), vec2(32768.0)))) {
+            imageStore(motion_img, pixel, vec4(object_motion.rg, 0.0, 0.0));
+            return;
+        }
+    }
+    // Avoid an expensive camera reprojection altogether for accepted object pixels.
+#endif
     const vec2 uv = (vec2(pixel) + 0.5) / size;
     // Depth was rasterised through a shifted viewport. Reconstruct its unjittered
     // position, and keep jitter out of FSR's motion vectors (as for the object vectors).
@@ -92,20 +111,6 @@ void main() {
     const vec3 mv_color = sky ? vec3(0.0, 0.0, 0.3) : vec3(0.5) + vec3(motion / 128.0, 0.0);
     imageStore(color_img, pixel, vec4(mix(current.rgb, mv_color, 0.75), current.a));
 #else
-    vec2 result = motion;
-    if (mode == 1) {
-        const vec4 object_motion = texelFetch(object_tex, pixel, 0);
-        // A later ordinary draw may have covered this pixel without touching the motion
-        // target. Its final depth then differs from the depth stored with the vector.
-        // Both depths are full precision. Do not accept an old foreground vector merely
-        // because perspective depth compresses distant surfaces into a small interval.
-        float depth_threshold = max(2e-7, (proj.z - depth) * 0.01);
-        if (object_motion.b > 0.99 && abs(object_motion.a - depth) < depth_threshold &&
-            !any(isnan(object_motion.rg)) &&
-            !any(isinf(object_motion.rg))) {
-            result = object_motion.rg;
-        }
-    }
-    imageStore(motion_img, pixel, vec4(result, 0.0, 0.0));
+    imageStore(motion_img, pixel, vec4(motion, 0.0, 0.0));
 #endif
 }
