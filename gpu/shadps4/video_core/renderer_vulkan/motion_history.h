@@ -234,10 +234,10 @@ public:
         uint64_t draws{}, stored{}, loaded{}, unmatched{}, exhausted{}, invalid{}, still{};
     } stats;
 
-    // A small skeleton (weapon, prop; most are static world pieces) only needs history
-    // while its bone palette changes: with last frame's bones its motion is the camera's.
-    // Checked before the index scan of Prepare, with a cheap identity. The first frame
-    // of a change stores positions (nothing to load yet), the next one loads them.
+    // Small skeletons (weapons/props) normally skip history if their palettes are static.
+    // Keep one additional frame after a palette change: when an animation stops, this
+    // last frame still needs the previous animated positions. The first frame of a
+    // change has no earlier positions unless the draw was already being tracked.
     struct GateKey {
         uint64_t shader{}, geometry{}, indices{};
         uint32_t index_count{}, instances{}, first_instance{}, occurrence{};
@@ -247,10 +247,11 @@ public:
         key.occurrence = 0;
         key.occurrence = gate_occurrences[key]++;
         const auto* prev = gate_previous.find(key);
-        const bool moving = prev && *prev != palette;
-        gate_current.emplace(key, palette);
-        stats.still += moving ? 0 : 1;
-        return moving;
+        const bool changed = prev && prev->palette != palette;
+        const bool track = changed || (prev && prev->changed);
+        gate_current.emplace(key, GateState{palette, changed});
+        stats.still += track ? 0 : 1;
+        return track;
     }
 
     void NextFrame() {
@@ -325,7 +326,11 @@ private:
             return size_t(h);
         }
     };
-    FlatMap<GateKey, uint64_t, GateHash> gate_previous, gate_current;
+    struct GateState {
+        uint64_t palette{};
+        bool changed{};
+    };
+    FlatMap<GateKey, GateState, GateHash> gate_previous, gate_current;
     FlatMap<GateKey, uint32_t, GateHash> gate_occurrences;
 };
 
