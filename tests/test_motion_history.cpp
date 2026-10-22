@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cstdio>
 #include "gpu/shadps4/video_core/renderer_vulkan/motion_history.h"
+#include "gpu/shadps4/video_core/renderer_vulkan/camera_motion_math.h"
 
 using namespace Vulkan::Motion;
 
@@ -125,6 +126,41 @@ int main() {
     // Multiple identical draws in the same frame still reuse the checked result.
     assert(dynamic_ranges.Get(mesh, 1, scan_dynamic, 1).topology == 2);
     assert(dynamic_scans == 2);
+
+    // CPU-normalized camera reprojection must match the old full-z reconstruction
+    // for non-unit projection scales, distant geometry, and sky. The compute
+    // shader now receives these coefficients and 1/proj.w each frame.
+    const std::array<float, 12> transform{
+        0.98f, 0.02f, 0.12f, 0.4f,
+        -0.01f, 1.01f, -0.07f, -0.3f,
+        -0.06f, 0.04f, 1.0f, 0.2f,
+    };
+    const std::array<float, 4> projection{1.4f, 1.8f, 1.0f, -0.05f};
+    const auto coefficients = NormalizeReprojection(transform, projection);
+    const auto dot4 = [](const std::array<float, 12>& m, u32 row,
+                         const std::array<float, 4>& v) {
+        float value = 0;
+        for (u32 c = 0; c < 4; ++c) value += m[row * 4 + c] * v[c];
+        return value;
+    };
+    for (float depth : {0.2f, 0.9f, 0.999995f, 1.0f}) {
+        const bool sky = depth == 1.0f;
+        const float denom = std::min(depth - projection[2], -1e-8f);
+        const float z = sky ? 1.0f : projection[3] / denom;
+        const float inv_z = sky ? 0.0f : denom / projection[3];
+        const std::array<float, 4> old_view{
+            0.31f * z / projection[0], -0.26f * z / projection[1], z,
+            sky ? 0.0f : 1.0f};
+        const std::array<float, 4> new_view{0.31f, -0.26f, 1.0f, inv_z};
+        const float old_z = dot4(transform, 2, old_view);
+        const float new_z = dot4(coefficients, 2, new_view);
+        assert(old_z > 0 && new_z > 0);
+        for (u32 axis = 0; axis < 2; ++axis) {
+            const float expected = dot4(transform, axis, old_view) / old_z;
+            const float actual = dot4(coefficients, axis, new_view) / new_z;
+            assert(std::fabs(expected - actual) < 2e-4f);
+        }
+    }
 
     assert(JitterPhases(1920, 1920) == 8);
     assert(JitterPhases(1280, 1920) == 18);
