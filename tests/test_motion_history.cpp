@@ -68,7 +68,8 @@ int main() {
     draw.vertices.count = 2;
     assert(!overflow.Prepare(draw).store && overflow.stats.invalid == 2);
 
-    // Small skeletons: history only while the bone palette changes (weapon spinning).
+    // Small skeletons: track changes and the first unchanged frame after them.
+    // Stopping an attack still needs the preceding animated positions to reproject.
     History gated(1024);
     const History::GateKey weapon{.shader = 7, .index_count = 3, .instances = 1};
     const auto frame = [&](uint64_t palette) {
@@ -78,11 +79,15 @@ int main() {
     assert(!gated.Moving(weapon, 1) && gated.stats.still == 1); // first sight
     assert(!frame(1));                    // same bones: camera motion
     assert(frame(2) && frame(3));         // spinning
-    assert(!frame(3));                    // stopped
+    assert(frame(3));                     // one trailing frame of history at the stop
+    assert(!frame(3));                    // static again; no ongoing GPU cost
+    assert(frame(4));                     // restart: no previous static history
+    assert(frame(4));                     // keep history for the transition to a stop
+    assert(!frame(4));                    // static once again
     gated.NextFrame();
     gated.NextFrame();
-    assert(!gated.Moving(weapon, 4));     // after a skipped frame: no comparison
-    assert(!gated.Moving(weapon, 5));     // second occurrence of the same draw
+    assert(!gated.Moving(weapon, 5));     // after a skipped frame: no comparison
+    assert(!gated.Moving(weapon, 6));     // second occurrence of the same draw
     assert(ClassifyBuffer(864) == BufferRole::Other && ClassifyBuffer(416) == BufferRole::Other);
     assert(ClassifyBuffer(96) == BufferRole::SmallSkeleton &&
            ClassifyBuffer(384) == BufferRole::SmallSkeleton);
