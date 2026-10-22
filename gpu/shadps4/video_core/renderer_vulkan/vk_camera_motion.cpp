@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "video_core/renderer_vulkan/vk_camera_motion.h"
+#include "video_core/renderer_vulkan/camera_motion_math.h"
 
 #include <cmath>
 #include <cstdio>
@@ -30,8 +31,9 @@ struct PushConstants {
     std::array<float, 2> previous_jitter;
     u32 mode;
     float object_depth_tolerance;
+    float inv_depth_offset;
 };
-static_assert(sizeof(PushConstants) == 112); // matches camera_motion.comp push-constant offsets
+static_assert(sizeof(PushConstants) == 116); // matches camera_motion.comp push-constant offsets
 
 /// a * b for 3x4 affine matrices (rows [R | t]).
 std::array<float, 12> Multiply(const std::array<float, 12>& a, const std::array<float, 12>& b) {
@@ -263,7 +265,8 @@ void CameraMotion::RecordMotion(vk::CommandBuffer cmdbuf, vk::ImageView depth_vi
         ? object_motion->PrepareRead(cmdbuf, width, height, object_valid) : depth_view;
     object_motion_ready = object_valid;
     const PushConstants push{
-        .reproject = Multiply(previous.view, current.inv_view),
+        .reproject = Motion::NormalizeReprojection(
+            Multiply(previous.view, current.inv_view), current.proj),
         .proj = current.proj,
         .prev_proj = previous.proj,
         .size = {float(width), float(height)},
@@ -271,6 +274,7 @@ void CameraMotion::RecordMotion(vk::CommandBuffer cmdbuf, vk::ImageView depth_vi
         .previous_jitter = previous_jitter,
         .mode = object_valid ? 1u : 0u,
         .object_depth_tolerance = object_depth_tolerance,
+        .inv_depth_offset = 1.0f / current.proj[3],
     };
     const vk::DescriptorImageInfo depth_info{.imageView = depth_view,
                                              .imageLayout = vk::ImageLayout::eGeneral};
@@ -313,7 +317,8 @@ void CameraMotion::OnConstants(const float* data) {
     std::memcpy(current.view.data(), data + 8, 12 * sizeof(float));
     std::memcpy(current.inv_view.data(), data + 180, 12 * sizeof(float));
     current.proj = {data[52], data[57], data[62], data[63]};
-    current.valid = current.proj[0] != 0.0f && current.proj[1] != 0.0f;
+    current.valid = current.proj[0] != 0.0f && current.proj[1] != 0.0f &&
+                    current.proj[3] != 0.0f;
     const std::array<u32, 2> size{u32(data[4]), u32(data[5])};
     if (size != render_size) {
         std::printf("Camera motion: scene render size %ux%u\n", size[0], size[1]);
@@ -377,7 +382,8 @@ void CameraMotion::Overlay(VideoCore::ImageId frame) {
     runtime.FlushBarriers();
 
     const PushConstants push{
-        .reproject = Multiply(previous.view, current.inv_view),
+        .reproject = Motion::NormalizeReprojection(
+            Multiply(previous.view, current.inv_view), current.proj),
         .proj = current.proj,
         .prev_proj = previous.proj,
         .size = {float(color.info.size.width), float(color.info.size.height)},
@@ -389,6 +395,7 @@ void CameraMotion::Overlay(VideoCore::ImageId frame) {
                 : BbToggle::Disabled(1u << 23) ? 4u
                                                : 0u,
         .object_depth_tolerance = 0.01f,
+        .inv_depth_offset = 1.0f / current.proj[3],
     };
     static u32 log_counter = 0;
     if (++log_counter % 200 == 0) {
