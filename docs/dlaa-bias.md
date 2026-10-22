@@ -27,9 +27,11 @@ The mask is omitted when object vectors are unavailable. FSR and TAA do not use 
   `BB_DLAA_PRESET=default` to let NGX choose. Other DLSS quality modes still
   request the driver default. Restart the game after changing this setting;
   the log reports the *requested* preset, not proof of which model was loaded.
-- `BB_DLAA_BIAS=1` (default): enable the current-color mask where object
-  motion is available.
-- `BB_DLAA_BIAS=0`: turn off the entire mask pass for an A/B comparison.
+- `BB_DLAA_BIAS=0` (default): skip the legacy current-color bias mask,
+  allocation and dispatch. Newer DLAA models (including Preset K) do not
+  support this input.
+- `BB_DLAA_BIAS=1` (experimental opt-in): submit the mask for comparison
+  with older models. Submitting it does not mean Preset K uses it.
 - `BB_DLAA_BIAS_STRENGTH=1.0` (default): multiply the mask by this factor.
   The accepted range is `0.0`–`2.0`; invalid values fall back to `1.0`.
   Increase it if trails remain, or reduce it if textures flicker or soften.
@@ -55,8 +57,9 @@ DLSS_SDK_ROOT=/e/cmaabb/NVIDIA-DLSS bash packaging/windows/build_dlss.sh
 Keep `out/bbport_dlss.dll` and `out/nvngx_dlss.dll` alongside
 `out/bb-probe.exe`. To request native DLAA, launch with
 `BB_UPSCALER=dlss BB_UPSCALE_PRESET=0 BB_FRAME_GEN=0` and the normal
-`BB_PROBE`/launcher options. The run log should show `DLSS: ready`,
-`preset 11`, and the `DLAA: animated-object history bias enabled` message.
+`BB_PROBE`/launcher options. The run log should show `DLSS: ready` and `preset 11`. The
+`DLAA: animated-object history bias enabled` message now appears only with
+explicit `BB_DLAA_BIAS=1`.
 
 For a controlled comparison, use the same scene and settings with
 `BB_DLAA_BIAS=0` and `1`. Record both ghosting and frame time, especially
@@ -139,8 +142,8 @@ They only matter with `BB_OBJECT_MOTION=1`.
 - **`BB_MOTION_INDEX_STRICT=0`**: leave the normal 32-frame index cache on
   unless a repeatable topology-history bug is diagnosed; strict mode hashes
   index buffers each frame.
-- **`BB_DLAA_BIAS=0` with Preset K:** avoids the unsupported bias-mask
-  texture and compute dispatch.
+- **`BB_DLAA_BIAS=0` (now default) with Preset K:** avoids the unsupported
+  bias-mask texture and compute dispatch.
 - **Sharpening strength at most 1.0:** values above 1.0 invoke a separate
   extra-sharpen blit and compute pass, with an RGBA32F scratch texture.
   Keep the default/no extra pass for a baseline frame-time measurement.
