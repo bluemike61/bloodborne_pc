@@ -539,9 +539,9 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
     // Keep the experimental path opt-in to avoid an R8 allocation and compute
     // dispatch that cannot improve those models' history reconstruction.
     const char* bias_setting = std::getenv("BB_DLAA_BIAS");
-    if (use_dlss && Dlss::QualityForScale(float(ow) / float(w)) == 0 &&
-        Dlss::Get()->SupportsBias() &&
-        (bias_setting && std::strcmp(bias_setting, "1") == 0) && DlssBiasStrength() > 0.0f) {
+    if (use_dlss && (bias_setting && std::strcmp(bias_setting, "1") == 0) &&
+        Dlss::QualityForScale(float(ow) / float(w)) == 0 &&
+        Dlss::Get()->SupportsBias() && DlssBiasStrength() > 0.0f) {
         make_image(dlss_bias_image, dlss_bias_view, vk::Format::eR8Unorm,
                    vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled);
     } else {
@@ -2293,7 +2293,11 @@ bool TemporalUpscaler::RecordDlss(vk::CommandBuffer cmdbuf, const Dlss::Resource
         const float sign = BbToggle::Disabled(1u << 26) ? -1.0f : 1.0f;
         const auto& settings = BbSettings::Get();
         Dlss::Resource bias{};
-        if (desc.quality == 0 && !dlss->SupportsBias()) {
+        // New transformer models do not support the legacy bias input.
+        // Keep the experiment opt-in to avoid the R8 image and compute pass.
+        const char* bias_setting = std::getenv("BB_DLAA_BIAS");
+        const bool bias_requested = bias_setting && std::strcmp(bias_setting, "1") == 0;
+        if (bias_requested && desc.quality == 0 && !dlss->SupportsBias()) {
             static bool reported_old_bridge = false;
             if (!reported_old_bridge) {
                 std::printf("DLAA: bias unavailable; rebuild bbport_dlss.dll with "
@@ -2301,14 +2305,9 @@ bool TemporalUpscaler::RecordDlss(vk::CommandBuffer cmdbuf, const Dlss::Resource
                 reported_old_bridge = true;
             }
         }
-        // Preset K/J (new transformer models) do not support the legacy bias input.
-    // Keep the experimental path opt-in to avoid an R8 allocation and compute
-    // dispatch that cannot improve those models' history reconstruction.
-    const char* bias_setting = std::getenv("BB_DLAA_BIAS");
-        // Zero strength means no bias at all; skip the compute pass and avoid
-        // handing NGX a redundant all-zero texture.
-        if (desc.quality == 0 && dlss->SupportsBias() &&
-            (bias_setting && std::strcmp(bias_setting, "1") == 0) && DlssBiasStrength() > 0.0f &&
+        // Zero strength means no mask: avoid the compute pass and empty texture.
+        if (bias_requested && desc.quality == 0 && dlss->SupportsBias() &&
+            DlssBiasStrength() > 0.0f &&
             RecordDlssBias(cmdbuf, depth.view, w, h)) {
             bias = {vk::Image(dlss_bias_image), *dlss_bias_view, vk::Format::eR8Unorm,
                     vk::ImageAspectFlagBits::eColor, w, h};
