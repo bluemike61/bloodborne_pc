@@ -93,6 +93,22 @@ The following changes are on the DLAA test branch:
   with new indices at the same address; it adds CPU hashing/scanning overhead.
   Test this separately from the small-skeleton option. Most skinned meshes
   use stable index buffers and should not need it.
+- **Small-skeleton animation stop transitions:** when bone movement ends, the
+  history gate now tracks *one final unchanged frame* instead of shutting off
+  immediately. This lets the final frame of a sword swing/weapon animation
+  reproject using the last moving frame. Static meshes don't incur continuing
+  vertex-history cost. This is on by default.
+- **Faster motion composition:** `camera_motion.comp` uses valid skinned-object
+  vectors directly, avoiding full camera reprojection for those pixels. Object
+  motion is rejected when the final scene depth no longer agrees, or when its
+  magnitude is too large to represent safely in the RG16F DLAA motion texture;
+  camera reprojection is used for those pixels. Applies to DLAA, FSR and TAA.
+- **`BB_MOTION_DEPTH_TOLERANCE=0.003` (opt-in):** tune how strictly object-motion
+  depth must agree with the final depth buffer. The default is `0.01`, preserving
+  previous behavior. Lower values (e.g. `0.003`) can reject more stale foreground
+  vectors at silhouettes, but can also reject correct vectors from depth rounding,
+  increasing blur. The accepted range is `0.0` to `0.05`; invalid values revert
+  to `0.01`. Test it as a separate startup-only A/B setting.
 
 `BB_OBJECT_MOTION_SMALL` and `BB_MOTION_INDEX_STRICT` both default to off.
 They only matter with `BB_OBJECT_MOTION=1`.
@@ -104,7 +120,10 @@ They only matter with `BB_OBJECT_MOTION=1`.
    attack and camera-pan test at native resolution and its approximate FPS.
 2. Repeat with **only** `BB_OBJECT_MOTION_SMALL=1`. Look for weapon, cape and
    accessory trails, and note any performance impact.
-3. Repeat with **only** `BB_MOTION_INDEX_STRICT=1`. If it helps, inspect
+3. Repeat with **only** `BB_MOTION_DEPTH_TOLERANCE=0.003` and compare
+   trails on high-contrast character edges; if details blur more, return to
+   the `0.01` default.
+4. Repeat with **only** `BB_MOTION_INDEX_STRICT=1`. If it helps, inspect
    `BB_FRAME_STATS=1` object-motion statistics and investigate index-buffer
    write frequency before enabling it by default.
 
@@ -114,7 +133,8 @@ motion. The game's debug motion view is useful for checking the actual vectors.
 The main character's full skeleton shaders do not use small-skeleton gating,
 so the opt-in option may primarily affect accessories rather than the torso.
 
-After building, run the CPU regression test for index-history behavior:
+After building, run the CPU regression test for index-history and the
+one-frame animation-stop gate:
 
 ```bash
 ninja -C out/gpu motion-history-test
