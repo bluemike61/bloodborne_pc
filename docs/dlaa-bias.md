@@ -113,6 +113,44 @@ The following changes are on the DLAA test branch:
 `BB_OBJECT_MOTION_SMALL` and `BB_MOTION_INDEX_STRICT` both default to off.
 They only matter with `BB_OBJECT_MOTION=1`.
 
+## DLAA frame-rate optimization (experimental)
+
+- **Default GPU optimization:** `camera_motion.comp` now evaluates previous-view
+  reprojection using current-view *reciprocal depth*. The renderer divides the
+  camera's reprojection XY coefficients by projection scale **once per frame**
+  and supplies `1 / proj.w` as a push constant. This removes the view-Z
+  reconstruction division (and associated multiplies) for camera-motion
+  pixels. The algebra preserves previous-minus-current vectors, sky rotation,
+  depth clipping and jitter cancellation. The stand-alone `motion-history-test`
+  checks the old/new perspective divide for non-unit FOV, near/far scene depth
+  and sky; `camera-motion-test` uses production SPIR-V on Vulkan hardware.
+  **FPS gains are not yet measured** and may be small on a GPU-bound system.
+- **`BB_OBJECT_MOTION_SMALL=0`**: recommended for performance. Keep normal
+  bone-palette motion gating, which still tracks the character's full skeleton
+  and selected moving weapon/prop palettes. Using `=1` records positions for
+  every recognized small-skeleton draw, including approximately 1,000 draws
+  in scenes where most are stationary. The original research in
+  `docs/motion_vectors.md` found that indiscriminate tracking can overflow
+  history and reduce FPS severely.
+- **Do not hash 416-byte model constants to detect rigid motion by default.**
+  They change with the camera on almost all draws; prior experiments slowed
+  scenes to about 40 FPS. `BB_OBJECT_MOTION_SMALL=1` remains an opt-in
+  correctness investigation only.
+- **`BB_MOTION_INDEX_STRICT=0`**: leave the normal 32-frame index cache on
+  unless a repeatable topology-history bug is diagnosed; strict mode hashes
+  index buffers each frame.
+- **`BB_DLAA_BIAS=0` with Preset K:** avoids the unsupported bias-mask
+  texture and compute dispatch.
+- **Sharpening strength at most 1.0:** values above 1.0 invoke a separate
+  extra-sharpen blit and compute pass, with an RGBA32F scratch texture.
+  Keep the default/no extra pass for a baseline frame-time measurement.
+
+For A/B tests, record the same static scene, camera pan and attack at a
+fixed resolution with `BB_FRAME_STATS=1`. Compare average FPS and frame-time
+spikes after shaders are warm. Run once with `BB_OBJECT_MOTION_SMALL=0` and
+once with `=1` to isolate the expensive override. Avoid changing DLAA
+preset, resolution and model selection at the same time.
+
 ### Suggested test order
 
 1. Keep `BB_DLAA_PRESET=K BB_DLAA_BIAS=0 BB_OBJECT_MOTION=1 BB_JITTER=1`
