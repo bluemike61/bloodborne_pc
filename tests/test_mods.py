@@ -52,6 +52,49 @@ class ModTests(unittest.TestCase):
             result = mods.build_overlay(self.game, self.root / 'out', layers)
             self.assertEqual((result / 'dvdroot_ps4/chr/a.dcx').read_bytes(), winner)
 
+    def test_generated_pc_menu_replaces_untracked_overlay_file(self):
+        # A Windows hard-link/mirrored-file overlay can expose a regular file
+        # even when the in-memory LINKED table has no entry. In that case the
+        # generated menu must replace the file without modifying the game.
+        original = self.game / 'dvdroot_ps4/menu/optionsetting.gfx'
+        original.parent.mkdir(parents=True)
+        original.write_bytes(b'original menu')
+        generated = self.root / 'generated/pc-menu'
+        replacement = generated / 'dvdroot_ps4/menu/optionsetting.gfx'
+        replacement.parent.mkdir(parents=True)
+        replacement.write_bytes(b'generated menu')
+        real_make_link = mods.make_link
+
+        def untracked_file(link, target):
+            if Path(target) == original:
+                # A hard link is a normal file as far as Path.is_symlink goes.
+                # Deliberately do not insert it into mods.LINKED.
+                os.link(target, link)
+            else:
+                real_make_link(link, target)
+
+        from unittest import mock
+        with mock.patch.object(mods, 'make_link', side_effect=untracked_file):
+            result = mods.build_overlay(
+                self.game, self.root / 'out', [('pc-menu', generated)])
+        self.assertEqual(
+            (result / 'dvdroot_ps4/menu/optionsetting.gfx').read_bytes(),
+            b'generated menu')
+        self.assertEqual(original.read_bytes(), b'original menu')
+
+    def test_generated_pc_menu_does_not_replace_a_directory(self):
+        # The new regular-file recovery must not hide a genuine conflict.
+        conflict = self.game / 'dvdroot_ps4/menu/optionsetting.gfx'
+        conflict.mkdir(parents=True)
+        (conflict / 'child').write_text('original directory')
+        generated = self.root / 'generated/pc-menu'
+        replacement = generated / 'dvdroot_ps4/menu/optionsetting.gfx'
+        replacement.parent.mkdir(parents=True)
+        replacement.write_bytes(b'generated menu')
+        with self.assertRaisesRegex(ValueError, 'File/directory conflict'):
+            mods.build_overlay(self.game, self.root / 'out', [('pc-menu', generated)])
+        self.assertEqual((conflict / 'child').read_text(), 'original directory')
+
     def test_selection_disable_and_new_mod(self):
         for name in ['C', 'B', 'A']:
             self.mod(name)
