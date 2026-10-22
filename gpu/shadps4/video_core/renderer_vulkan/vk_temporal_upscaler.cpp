@@ -535,10 +535,13 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
                    vk::ImageUsageFlagBits::eTransferSrc);
     make_image(reactive_image, reactive_view, vk::Format::eR8Unorm,
                vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled);
+    // Preset K/J (new transformer models) do not support the legacy bias input.
+    // Keep the experimental path opt-in to avoid an R8 allocation and compute
+    // dispatch that cannot improve those models' history reconstruction.
     const char* bias_setting = std::getenv("BB_DLAA_BIAS");
     if (use_dlss && Dlss::QualityForScale(float(ow) / float(w)) == 0 &&
         Dlss::Get()->SupportsBias() &&
-        !(bias_setting && bias_setting[0] == '0') && DlssBiasStrength() > 0.0f) {
+        (bias_setting && std::strcmp(bias_setting, "1") == 0) && DlssBiasStrength() > 0.0f) {
         make_image(dlss_bias_image, dlss_bias_view, vk::Format::eR8Unorm,
                    vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled);
     } else {
@@ -2298,18 +2301,21 @@ bool TemporalUpscaler::RecordDlss(vk::CommandBuffer cmdbuf, const Dlss::Resource
                 reported_old_bridge = true;
             }
         }
-        const char* bias_setting = std::getenv("BB_DLAA_BIAS");
+        // Preset K/J (new transformer models) do not support the legacy bias input.
+    // Keep the experimental path opt-in to avoid an R8 allocation and compute
+    // dispatch that cannot improve those models' history reconstruction.
+    const char* bias_setting = std::getenv("BB_DLAA_BIAS");
         // Zero strength means no bias at all; skip the compute pass and avoid
         // handing NGX a redundant all-zero texture.
         if (desc.quality == 0 && dlss->SupportsBias() &&
-            !(bias_setting && bias_setting[0] == '0') && DlssBiasStrength() > 0.0f &&
+            (bias_setting && std::strcmp(bias_setting, "1") == 0) && DlssBiasStrength() > 0.0f &&
             RecordDlssBias(cmdbuf, depth.view, w, h)) {
             bias = {vk::Image(dlss_bias_image), *dlss_bias_view, vk::Format::eR8Unorm,
                     vk::ImageAspectFlagBits::eColor, w, h};
             static bool reported = false;
             if (!reported) {
                 std::printf("DLAA: animated-object history bias enabled (mask submitted; "
-                            "model may ignore it; strength %.2f; BB_DLAA_BIAS=0 disables)\n",
+                            "new models may ignore it; strength %.2f; BB_DLAA_BIAS=1 opt-in)\n",
                             DlssBiasStrength());
                 reported = true;
             }
