@@ -330,7 +330,22 @@ def _overlay_at(game, out, replacements):
             if is_link(destination):
                 replaced += link_target(destination).is_relative_to(game)
                 remove_link(destination)
+            elif destination.is_file():
+                # Some Windows setups materialize a regular file here instead
+                # of a tracked overlay link (for example, a hard link that lost
+                # its LINKED entry). A file replacement is not a file/directory
+                # conflict. The destination is inside our *new temporary overlay*,
+                # never inside the original game tree.
+                original = game / destination.relative_to(overlay)
+                game_link = (original if original.is_file() and
+                             os.path.samefile(destination, original) else None)
+                if game_link is not None:
+                    replaced += 1
+                # If Windows needs to clear a read-only hard link to unlink it,
+                # restore the original game's file attribute afterwards.
+                unlink_file(destination, game_link)
             elif destination.exists():
+                # Only genuine file-vs-directory collisions should prevent launch.
                 raise ValueError(f'File/directory conflict: {relative}')
             else:
                 added += 1
