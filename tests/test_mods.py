@@ -83,17 +83,17 @@ class ModTests(unittest.TestCase):
         self.assertEqual(original.read_bytes(), b'original menu')
 
     def test_generated_pc_menu_does_not_replace_a_directory(self):
-        # The new regular-file recovery must not hide a genuine conflict.
-        conflict = self.game / 'dvdroot_ps4/menu/optionsetting.gfx'
-        conflict.mkdir(parents=True)
-        (conflict / 'child').write_text('original directory')
+        # The new regular-file recovery must not hide a genuine conflict:
+        # a mod's directory must never replace an original game *file*.
+        conflict = self.game / 'dvdroot_ps4/menu'
+        conflict.write_bytes(b'original regular file')
         generated = self.root / 'generated/pc-menu'
         replacement = generated / 'dvdroot_ps4/menu/optionsetting.gfx'
         replacement.parent.mkdir(parents=True)
         replacement.write_bytes(b'generated menu')
         with self.assertRaisesRegex(ValueError, 'File/directory conflict'):
             mods.build_overlay(self.game, self.root / 'out', [('pc-menu', generated)])
-        self.assertEqual((conflict / 'child').read_text(), 'original directory')
+        self.assertEqual(conflict.read_bytes(), b'original regular file')
 
     def test_selection_disable_and_new_mod(self):
         for name in ['C', 'B', 'A']:
